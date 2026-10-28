@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <script>
+      try {
+        document.querySelector('meta[name="color-scheme"]').content =
+          localStorage.getItem("gridpulse-color-scheme") ?? "light";
+      } catch (_) {
+        document.querySelector('meta[name="color-scheme"]').content = "light";
+      }
+    </script>
+    <title>GridPulse AI — Smart Grid Demand Forecasting &amp; Pattern Mining</title>
+    <meta
+      name="description"
+      content="Operational telemetry analysis, sensor anomaly repair, weather-load regime clustering, and 24-hour-ahead ensemble electricity demand forecasting across 10 U.S. cities (163,993 hourly records)."
+    />
+    <meta property="og:title" content="GridPulse AI — Smart Grid Demand Forecasting &amp; Pattern Mining" />
+    <meta
+      property="og:description"
+      content="163,993 hourly electricity and weather records across 10 U.S. cities. Stacking Ensemble reaches 351.13 MWh RMSE (+52.59% skill vs. naive baseline)."
+    />
+    <meta property="og:type" content="website" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Source+Sans+3:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

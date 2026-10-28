@@ -1,0 +1,52 @@
+# Project Configuration for Smart Grid Demand Forecasting
+
+paths:
+  raw_dir: "data/raw"
+  interim_dir: "data/interim"
+  processed_dir: "data/processed"
+  reports_dir: "reports"
+  figures_dir: "reports/figures"
+
+dataset:
+  # Mapping from canonical city slug (matching JSON filenames) to display name and CSV city name
+  cities:
+    dallas:
+      csv_name: "dallas"
+      display_name: "Dallas"
+      timezone: "America/Chicago"
+    houston:
+      csv_name: "houston"
+      display_name: "Houston"
+      timezone: "America/Chicago"
+    la:
+      csv_name: "la"
+      display_name: "Los Angeles"
+      timezone: "America/Los_Angeles"
+    nyc:
+      csv_name: "nyc"
+      display_name: "New York City"
+      timezone: "America/New_York"
+    philadelphia:
+      csv_name: "philadelphia"
+      display_name: "Philadelphia"
+      timezone: "America/New_York"
+    phoenix:
+      csv_name: "phoenix"
+      display_name: "Phoenix"
+      timezone: "America/Phoenix"
+    san_antonio:
+      csv_name: "san antonio"
+      display_name: "San Antonio"
+      timezone: "America/Chicago"
+    san_diego:
+      csv_name: "san diego"
+      display_name: "San Diego"
+      timezone: "America/Los_Angeles"
+    san_jose:
+      csv_name: "san jose"
+      display_name: "San Jose"
+      timezone: "America/Los_Angeles"
+    seattle:
+      csv_name: "seattle"
+      display_name: "Seattle"
+      timezone: "America/Los_Angeles"
