@@ -1,0 +1,330 @@
+/* ==========================================================================
+   GridPulse AI — Single Source of Design Tokens
+   Aesthetic: "Dispatch Bulletin Meets Multi-Pen Strip-Chart Recorder"
+   ========================================================================== */
+
+:root {
+  /* 1. Raw Light Mode ("Warm Archival Paper") — 4 UI base tones + 1 signal */
+  --raw-paper-light: #F5F1E8;
+  --raw-vellum-light: #EAE4D7;
+  --raw-graphite-light: #524E46;
+  --raw-ink-light: #161614;
+  --raw-signal-light: #C93818;
+
+  /* 2. Raw Dark Mode ("Deep Control-Room Ink") */
+  --raw-paper-dark: #121311;
+  --raw-vellum-dark: #1B1D19;
+  --raw-graphite-dark: #A8A296;
+  --raw-ink-dark: #F2EEE4;
+  --raw-signal-dark: #FF5936;
+
+  /* 3. Calibrated Multi-Pen Recorder Trace Inks (Colorblind-tested, distinct per model) */
+  --raw-xgb-light: #1464A5;
+  --raw-xgb-dark: #4EA8F0;
+
+  --raw-rf-light: #117A58;
+  --raw-rf-dark: #38CB97;
+
+  --raw-mlp-light: #AD6800;
+  --raw-mlp-dark: #F5B841;
+
+  --raw-ridge-light: #8C3470;
+  --raw-ridge-dark: #E47AC3;
+
+  --raw-sarimax-light: #0C7985;
+  --raw-sarimax-dark: #4AD4E0;
+
+  --raw-naive-light: #6E6A60;
+  --raw-naive-dark: #9B968B;
+
+  /* 4. Colorblind-safe Cluster Palette (Okabe-Ito / Tol high-contrast inks) */
+  --raw-c0-light: #1D5B8C;
+  --raw-c0-dark: #5CA8E6;
+  --raw-c1-light: #C93818;
+  --raw-c1-dark: #FF5936;
+  --raw-c2-light: #9A6700;
+  --raw-c2-dark: #E5A93B;
+  --raw-c3-light: #16695B;
+  --raw-c3-dark: #45B8A4;
+  --raw-c4-light: #7A3E78;
+  --raw-c4-dark: #C982C6;
+  --raw-c5-light: #556B1E;
+  --raw-c5-dark: #9CC04B;
+  --raw-c6-light: #8C4A27;
+  --raw-c6-dark: #D9885B;
+  --raw-c7-light: #3D3B37;
+  --raw-c7-dark: #B8B3A8;
+
+  /* Default token bindings (Light baseline fallback) */
+  --c-paper: var(--raw-paper-light);
+  --c-vellum: var(--raw-vellum-light);
+  --c-graphite: var(--raw-graphite-light);
+  --c-ink: var(--raw-ink-light);
+  --c-signal: var(--raw-signal-light);
+
+  --c-trace-xgb: var(--raw-xgb-light);
+  --c-trace-rf: var(--raw-rf-light);
+  --c-trace-mlp: var(--raw-mlp-light);
+  --c-trace-ridge: var(--raw-ridge-light);
+  --c-trace-sarimax: var(--raw-sarimax-light);
+  --c-trace-naive: var(--raw-naive-light);
+
+  --c-cluster-0: var(--raw-c0-light);
+  --c-cluster-1: var(--raw-c1-light);
+  --c-cluster-2: var(--raw-c2-light);
+  --c-cluster-3: var(--raw-c3-light);
+  --c-cluster-4: var(--raw-c4-light);
+  --c-cluster-5: var(--raw-c5-light);
+  --c-cluster-6: var(--raw-c6-light);
+  --c-cluster-7: var(--raw-c7-light);
+
+  /* Fallback for browsers without light-dark() when OS prefers dark */
+  @media (prefers-color-scheme: dark) {
+    --c-paper: var(--raw-paper-dark);
+    --c-vellum: var(--raw-vellum-dark);
+    --c-graphite: var(--raw-graphite-dark);
+    --c-ink: var(--raw-ink-dark);
+    --c-signal: var(--raw-signal-dark);
+
+    --c-trace-xgb: var(--raw-xgb-dark);
+    --c-trace-rf: var(--raw-rf-dark);
+    --c-trace-mlp: var(--raw-mlp-dark);
+    --c-trace-ridge: var(--raw-ridge-dark);
+    --c-trace-sarimax: var(--raw-sarimax-dark);
+    --c-trace-naive: var(--raw-naive-dark);
+
+    --c-cluster-0: var(--raw-c0-dark);
+    --c-cluster-1: var(--raw-c1-dark);
+    --c-cluster-2: var(--raw-c2-dark);
+    --c-cluster-3: var(--raw-c3-dark);
+    --c-cluster-4: var(--raw-c4-dark);
+    --c-cluster-5: var(--raw-c5-dark);
+    --c-cluster-6: var(--raw-c6-dark);
+    --c-cluster-7: var(--raw-c7-dark);
+  }
+
+  /* Explicit meta overrides for browsers without light-dark() */
+  &:has(> head > meta[name="color-scheme"][content="light"]) {
+    --c-paper: var(--raw-paper-light);
+    --c-vellum: var(--raw-vellum-light);
+    --c-graphite: var(--raw-graphite-light);
+    --c-ink: var(--raw-ink-light);
+    --c-signal: var(--raw-signal-light);
+
+    --c-trace-xgb: var(--raw-xgb-light);
+    --c-trace-rf: var(--raw-rf-light);
+    --c-trace-mlp: var(--raw-mlp-light);
+    --c-trace-ridge: var(--raw-ridge-light);
+    --c-trace-sarimax: var(--raw-sarimax-light);
+    --c-trace-naive: var(--raw-naive-light);
+
+    --c-cluster-0: var(--raw-c0-light);
+    --c-cluster-1: var(--raw-c1-light);
+    --c-cluster-2: var(--raw-c2-light);
+    --c-cluster-3: var(--raw-c3-light);
+    --c-cluster-4: var(--raw-c4-light);
+    --c-cluster-5: var(--raw-c5-light);
+    --c-cluster-6: var(--raw-c6-light);
+    --c-cluster-7: var(--raw-c7-light);
+  }
+
+  &:has(> head > meta[name="color-scheme"][content="dark"]) {
+    --c-paper: var(--raw-paper-dark);
+    --c-vellum: var(--raw-vellum-dark);
+    --c-graphite: var(--raw-graphite-dark);
+    --c-ink: var(--raw-ink-dark);
+    --c-signal: var(--raw-signal-dark);
+
+    --c-trace-xgb: var(--raw-xgb-dark);
+    --c-trace-rf: var(--raw-rf-dark);
+    --c-trace-mlp: var(--raw-mlp-dark);
+    --c-trace-ridge: var(--raw-ridge-dark);
+    --c-trace-sarimax: var(--raw-sarimax-dark);
+    --c-trace-naive: var(--raw-naive-dark);
+
+    --c-cluster-0: var(--raw-c0-dark);
+    --c-cluster-1: var(--raw-c1-dark);
+    --c-cluster-2: var(--raw-c2-dark);
+    --c-cluster-3: var(--raw-c3-dark);
+    --c-cluster-4: var(--raw-c4-dark);
+    --c-cluster-5: var(--raw-c5-dark);
+    --c-cluster-6: var(--raw-c6-dark);
+    --c-cluster-7: var(--raw-c7-dark);
+  }
+
+  /* Modern native light-dark() resolution synced to computed color-scheme */
+  @supports (color: light-dark(white, black)) {
+    --c-paper: light-dark(var(--raw-paper-light), var(--raw-paper-dark));
+    --c-vellum: light-dark(var(--raw-vellum-light), var(--raw-vellum-dark));
+    --c-graphite: light-dark(var(--raw-graphite-light), var(--raw-graphite-dark));
+    --c-ink: light-dark(var(--raw-ink-light), var(--raw-ink-dark));
+    --c-signal: light-dark(var(--raw-signal-light), var(--raw-signal-dark));
+
+    --c-trace-xgb: light-dark(var(--raw-xgb-light), var(--raw-xgb-dark));
+    --c-trace-rf: light-dark(var(--raw-rf-light), var(--raw-rf-dark));
+    --c-trace-mlp: light-dark(var(--raw-mlp-light), var(--raw-mlp-dark));
+    --c-trace-ridge: light-dark(var(--raw-ridge-light), var(--raw-ridge-dark));
+    --c-trace-sarimax: light-dark(var(--raw-sarimax-light), var(--raw-sarimax-dark));
+    --c-trace-naive: light-dark(var(--raw-naive-light), var(--raw-naive-dark));
+
+    --c-cluster-0: light-dark(var(--raw-c0-light), var(--raw-c0-dark));
+    --c-cluster-1: light-dark(var(--raw-c1-light), var(--raw-c1-dark));
+    --c-cluster-2: light-dark(var(--raw-c2-light), var(--raw-c2-dark));
+    --c-cluster-3: light-dark(var(--raw-c3-light), var(--raw-c3-dark));
+    --c-cluster-4: light-dark(var(--raw-c4-light), var(--raw-c4-dark));
+    --c-cluster-5: light-dark(var(--raw-c5-light), var(--raw-c5-dark));
+    --c-cluster-6: light-dark(var(--raw-c6-light), var(--raw-c6-dark));
+    --c-cluster-7: light-dark(var(--raw-c7-light), var(--raw-c7-dark));
+  }
+
+  /* Derived structural rules & instrument tints */
+  --c-rule: color-mix(in oklab, var(--c-ink) 18%, var(--c-paper));
+  --c-rule-strong: color-mix(in oklab, var(--c-ink) 44%, var(--c-paper));
+  --c-grid: color-mix(in oklab, var(--c-ink) 13%, var(--c-paper));
+  --c-signal-tint: color-mix(in oklab, var(--c-signal) 12%, var(--c-paper));
+  --c-ink-tint: color-mix(in oklab, var(--c-ink) 6%, var(--c-paper));
+
+  /* Viewport-wide native UI color-scheme + <meta> override reflection */
+  color-scheme: light dark;
+
+  &:has(> head > meta[name="color-scheme"][content="dark"]) {
+    color-scheme: dark;
+  }
+
+  &:has(> head > meta[name="color-scheme"][content="light"]) {
+    color-scheme: light;
+  }
+
+  accent-color: var(--c-signal);
+  scrollbar-width: thin;
+  scrollbar-color: var(--c-rule-strong) var(--c-vellum);
+
+  /* Typography — Editorial Serif, Humanist Sans, and Tabular Monospace */
+  --font-display: "Newsreader", Georgia, serif;
+  --font-sans: "Source Sans 3", sans-serif;
+  --font-mono: "IBM Plex Mono", monospace;
+
+  /* Fluid Type Scale combining rem + vw via clamp() */
+  --text-hero: clamp(1.9rem, 1.35rem + 2.6vw, 3.65rem);
+  --text-h1: clamp(1.5rem, 1.2rem + 1.4vw, 2.4rem);
+  --text-h2: clamp(1.22rem, 1.05rem + 0.75vw, 1.7rem);
+  --text-h3: clamp(1rem, 0.94rem + 0.35vw, 1.22rem);
+  --text-body: clamp(0.93rem, 0.9rem + 0.15vw, 1.03rem);
+  --text-sm: 0.84rem;
+  --text-xs: 0.74rem;
+
+  /* Fluid Spacing & Shell Width */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: clamp(1.1rem, 2vw, 1.5rem);
+  --space-6: clamp(1.4rem, 2.8vw, 2.1rem);
+  --space-7: clamp(2rem, 4vw, 3.2rem);
+
+  --max-width: 1520px;
+  --gutter: clamp(0.85rem, 2.5dvw, 2.5rem);
+
+  /* Motion */
+  --ease-out-quart: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 150ms;
+  --dur-med: 320ms;
+  --dur-chart: 520ms;
+}
+
+/* Forced Colors (Windows High Contrast) support */
+@media (forced-colors: active) {
+  :root {
+    --c-paper: Canvas;
+    --c-vellum: Canvas;
+    --c-ink: CanvasText;
+    --c-graphite: GrayText;
+    --c-signal: Highlight;
+    --c-rule: CanvasText;
+    --c-rule-strong: CanvasText;
+    --c-grid: GrayText;
+  }
+}
+
+/* Reduced Motion support */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-med: 0ms;
+    --dur-chart: 0ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@supports not (scrollbar-color: auto) {
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--c-rule-strong);
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--c-vellum);
+  }
+}
+
+@supports not (accent-color: #C93818) {
+  input[type="checkbox"].gp-check {
+    position: absolute !important;
+    clip-path: inset(50%) !important;
+    overflow: hidden !important;
+    width: 1px !important;
+    height: 1px !important;
+    margin: -1px !important;
+    padding: 0 !important;
+    border: 0 !important;
+    white-space: nowrap !important;
+  }
+
+  label.gp-check-label {
+    position: relative;
+    padding-inline-start: 1.5rem;
+  }
+
+  input[type="checkbox"].gp-check + span::before {
+    content: "";
+    position: absolute;
+    inset-inline-start: 0;
+    inset-block-start: 50%;
+    transform: translateY(-50%);
+    width: 0.95rem;
+    height: 0.95rem;
+    border: 1.5px solid var(--c-rule-strong);
+    background: var(--c-paper);
+  }
+
+  input[type="checkbox"].gp-check:focus-visible + span::before {
+    outline: 2px solid var(--c-signal);
+    outline-offset: 2px;
+  }
+
+  input[type="checkbox"].gp-check:checked + span::before {
+    background-color: var(--c-signal);
+    border-color: var(--c-signal);
+  }
+
+  input[type="checkbox"].gp-check:checked + span::after {
+    content: "\2713";
+    position: absolute;
+    inset-inline-start: 0.16rem;
+    inset-block-start: 50%;
+    transform: translateY(-50%);
+    color: var(--c-paper);
+    font-size: 0.72rem;
+    font-weight: 600;
+  }
+}

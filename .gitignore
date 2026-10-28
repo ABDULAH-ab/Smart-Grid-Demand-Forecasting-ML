@@ -218,3 +218,23 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Data & standalone pipeline scripts (notebooks contain the data/ML workflow)
+/data
+/src/
+
+# Local documents & OS/editor metadata
+*.docx
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Frontend Node modules & build artifacts
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# png images
+*.png
+*.jpg
+*.jpeg
