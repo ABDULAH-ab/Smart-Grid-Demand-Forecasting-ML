@@ -63,6 +63,7 @@ export default function OverviewHub({
   };
 
   const activeMeta = getCityMeta(selectedCity);
+  const isInitialLoad = loading && !edaData;
 
   return (
     <div className="reveal-frame">
@@ -86,18 +87,18 @@ export default function OverviewHub({
                 <button
                   type="button"
                   className="segmented-btn"
-                  aria-pressed={targetSection === "forecast"}
-                  onClick={() => setTargetSection("forecast")}
-                >
-                  04 Forecast Studio
-                </button>
-                <button
-                  type="button"
-                  className="segmented-btn"
                   aria-pressed={targetSection === "eda"}
                   onClick={() => setTargetSection("eda")}
                 >
                   02 Quality &amp; EDA
+                </button>
+                <button
+                  type="button"
+                  className="segmented-btn"
+                  aria-pressed={targetSection === "forecast"}
+                  onClick={() => setTargetSection("forecast")}
+                >
+                  04 Forecast Studio
                 </button>
               </div>
             </div>
@@ -120,14 +121,14 @@ export default function OverviewHub({
           </div>
 
           <div>
-            {loading ? (
+            {isInitialLoad ? (
               <LoadingInstrument label="Polling 10-city telemetry index and ISO envelopes..." height={380} />
             ) : error ? (
               <ErrorState error={error} onRetry={handleRetry} contextLabel="CITY SWITCHBOARD" />
             ) : !cityRows.some((r) => r.stats) ? (
               <EmptyState
                 title="No city summary telemetry available"
-                description="GET /api/eda returned an empty anomaly_summary_all_cities array."
+                description="The server returned an empty city telemetry summary."
                 actionLabel="Retry Switchboard Sync"
                 onAction={handleRetry}
               />
@@ -242,14 +243,14 @@ export default function OverviewHub({
               </button>
             </div>
 
-            {loading ? (
+            {loading && !leaderboard.length ? (
               <LoadingInstrument label="Computing confidence interval brackets..." height={240} />
             ) : error ? (
               <ErrorState error={error} onRetry={handleRetry} contextLabel="LEADERBOARD" />
             ) : !leaderboard.length ? (
               <EmptyState
                 title="Leaderboard metrics empty"
-                description="No rows returned by GET /api/leaderboard."
+                description="No leaderboard rows returned by the server."
                 actionLabel="Retry"
                 onAction={handleRetry}
               />

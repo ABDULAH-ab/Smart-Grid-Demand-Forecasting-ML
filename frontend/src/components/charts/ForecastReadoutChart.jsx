@@ -1,229 +1,499 @@
-import React, { useId, useMemo, useState } from "react";
-import {
-  Brush,
-  CartesianGrid,
-  Line,
-  LineChart,
-  ReferenceDot,
-  ReferenceLine,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-import { FORECAST_MODELS, MODEL_BY_KEY, formatModelName } from "../../constants/cities";
-import { useContainerWidth, useReducedMotion } from "../../hooks/useChartEnvironment";
+import React, { useCallback, useId, useMemo, useRef, useState } from "react";
+import ReactECharts from "echarts-for-react";
+import { FORECAST_MODELS, formatModelName } from "../../constants/cities";
+import { useEChartsColors, getModelEChartsColor } from "../../hooks/useEChartsColors";
+import ChartZoomToolbar from "./ChartZoomToolbar";
 
-function formatAxisStamp(ts, isCompact) {
+/**
+ * Format timestamp stamp for x-axis ticks
+ */
+function formatAxisStamp(ts) {
   if (!ts || typeof ts !== "string") return "";
   const clean = ts.replace("T", " ");
   const [datePart, timePart = "00:00"] = clean.split(" ");
   const mmdd = datePart.slice(5);
-  if (isCompact) return mmdd;
   return `${mmdd} ${timePart.slice(0, 5)}`;
 }
 
-function formatYAxisTick(val, isCompact) {
-  const num = Number(val);
-  if (!Number.isFinite(num)) return "";
-  if (isCompact && Math.abs(num) >= 1000) {
-    return `${(num / 1000).toFixed(num % 1000 === 0 ? 0 : 1)}k`;
-  }
-  return num.toLocaleString();
-}
-
-function ForecastTooltip({ active, payload, label }) {
-  if (!active || !payload || !payload.length) return null;
-
-  // Sort tooltip rows descending by MWh value so order matches visual vertical trace stack
-  const sorted = [...payload].sort((a, b) => Number(b.value) - Number(a.value));
-
-  return (
-    <div className="gp-tooltip">
-      <div className="gp-tooltip-head">{String(label).replace("T", " ").slice(0, 16)} UTC</div>
-      {sorted.map((entry) => {
-        const isActual = entry.dataKey === "actual_demand";
-        const spec = MODEL_BY_KEY[entry.dataKey];
-        const swatchColor = isActual ? "var(--c-ink)" : spec?.color || "var(--c-graphite)";
-
-        return (
-          <div key={entry.dataKey} className="gp-tooltip-row">
-            <span
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "0.42rem",
-                fontWeight: isActual || entry.dataKey === "Stacking_Ensemble" ? 600 : 400,
-              }}
-            >
-              <span
-                aria-hidden="true"
-                style={{
-                  display: "inline-block",
-                  inlineSize: "10px",
-                  blockSize: isActual ? "3px" : "2.2px",
-                  backgroundColor: swatchColor,
-                }}
-              />
-              <span>{isActual ? "Actual Load" : formatModelName(entry.dataKey)}</span>
-            </span>
-            <span style={{ fontWeight: 500 }}>
-              {Number(entry.value).toLocaleString(undefined, { maximumFractionDigits: 1 })} MWh
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 /**
- * Custom collision-free Peak Callout SVG renderer:
- * Draws a crisp target ring on the peak point and anchors the badge cleanly
- * in the top margin headroom so it never collides with forecast lines.
- */
-function PeakCalloutShape({ cx, cy, valueText }) {
-  if (!Number.isFinite(cx) || !Number.isFinite(cy)) return null;
-  const badgeY = 6;
-  const badgeW = 118;
-  const clampedX = Math.max(badgeW / 2 + 48, cx);
-
-  return (
-    <g pointerEvents="none">
-      <line
-        x1={cx}
-        y1={badgeY + 16}
-        x2={cx}
-        y2={cy - 5}
-        stroke="var(--c-signal)"
-        strokeWidth="1"
-        strokeDasharray="2 2"
-      />
-      <circle
-        cx={cx}
-        cy={cy}
-        r={5}
-        fill="var(--c-paper)"
-        stroke="var(--c-signal)"
-        strokeWidth={2}
-      />
-      <circle cx={cx} cy={cy} r={2} fill="var(--c-signal)" />
-      <rect
-        x={clampedX - badgeW / 2}
-        y={badgeY}
-        width={badgeW}
-        height={17}
-        fill="var(--c-paper)"
-        stroke="var(--c-signal)"
-        strokeWidth="1"
-      />
-      <text
-        x={clampedX}
-        y={badgeY + 11.8}
-        textAnchor="middle"
-        fill="var(--c-signal)"
-        fontFamily="var(--font-mono)"
-        fontSize="9.5"
-        fontWeight="600"
-      >
-        {valueText}
-      </text>
-    </g>
-  );
-}
-
-/**
- * Multi-pen strip-chart recorder readout for Actual vs. Predicted electricity demand.
+ * High-performance, modern Apache ECharts strip-chart recorder for Actual vs. Day-Ahead Forecasts.
  * Features:
- * - Distinct multi-pen color + dash cadence per model
- * - Interactive hover & click-to-pin trace spotlighting
- * - Fluid Recharts draw/morph animations (respects prefers-reduced-motion)
- * - Container-aware responsive sizing across 360px phones, tablets, and desktops
- * - Optional interactive time-window Brush zoom scrubber
+ * - Fluid coordinate tween animations when parameters (city, dates, models) update
+ * - Native, silky smooth mouse-wheel zoom & drag-to-pan (isolated to this chart)
+ * - Interactive bottom timeline scrubber bar (dataZoom slider)
+ * - Multi-pen trace spotlighting (hover or click to isolate a model)
+ * - Calibrated dark/light theme awareness
+ * - Collision-free Peak Demand callout marker
  */
 export default function ForecastReadoutChart({
   series = [],
   activeModels = ["Stacking_Ensemble", "Naive_Baseline"],
   cityLabel = "Dallas",
-  height = 360,
+  height = 370,
   compact = false,
-  syncId,
+  onZoomRangeChange = null,
 }) {
   const tableCaptionId = useId();
-  const [containerRef, containerWidth] = useContainerWidth(900);
-  const reducedMotion = useReducedMotion();
+  const echartsRef = useRef(null);
+  const colors = useEChartsColors();
 
   const [hoveredTrace, setHoveredTrace] = useState(null);
   const [pinnedTrace, setPinnedTrace] = useState(null);
-  const [showZoomBrush, setShowZoomBrush] = useState(false);
+  const [zoomFactor, setZoomFactor] = useState(1);
+  const [isZoomed, setIsZoomed] = useState(false);
 
   const spotlightKey = hoveredTrace || pinnedTrace;
+  const totalPoints = series.length;
 
-  const isMobile = containerWidth < 540;
-  const isTablet = containerWidth >= 540 && containerWidth < 860;
-  const responsiveHeight = isMobile
-    ? Math.min(height, 250)
-    : isTablet
-    ? Math.min(height, 305)
-    : height;
-
-  const { peakPoint, yDomain, lastIndex } = useMemo(() => {
-    if (!series.length) {
-      return { peakPoint: null, yDomain: [0, 1000], lastIndex: 0 };
-    }
-    let peak = series[0];
-    let minVal = Infinity;
+  // Find peak point of actual demand
+  const { peakIndex, peakActual } = useMemo(() => {
+    if (!series.length) return { peakIndex: -1, peakActual: 0 };
+    let maxIdx = 0;
     let maxVal = -Infinity;
-
-    const keysToScan = ["actual_demand", ...activeModels];
-    for (const row of series) {
-      if (row.actual_demand > (peak?.actual_demand ?? -Infinity)) {
-        peak = row;
-      }
-      for (const k of keysToScan) {
-        const v = Number(row[k]);
-        if (Number.isFinite(v)) {
-          if (v < minVal) minVal = v;
-          if (v > maxVal) maxVal = v;
-        }
+    for (let i = 0; i < series.length; i++) {
+      const v = Number(series[i].actual_demand);
+      if (v > maxVal) {
+        maxVal = v;
+        maxIdx = i;
       }
     }
-    const span = Math.max(maxVal - minVal, 100);
-    const bottomPad = span * 0.08;
-    // Extra top headroom so the peak callout badge never collides with curves
-    const topPad = span * 0.2;
-    return {
-      peakPoint: peak,
-      yDomain: [
-        Math.max(0, Math.floor((minVal - bottomPad) / 50) * 50),
-        Math.ceil((maxVal + topPad) / 50) * 50,
-      ],
-      lastIndex: series.length - 1,
-    };
-  }, [series, activeModels]);
+    return { peakIndex: maxIdx, peakActual: maxVal };
+  }, [series]);
 
-  if (!series.length) return null;
-
-  const enabledSpecs = FORECAST_MODELS.filter((m) => activeModels.includes(m.key));
-  const tableSampleStep = Math.max(1, Math.floor(series.length / 12));
-  const sampledRows = series.filter((_, idx) => idx % tableSampleStep === 0 || idx === lastIndex);
+  const timestamps = useMemo(() => series.map((r) => r.timestamp), [series]);
+  const enabledSpecs = useMemo(
+    () => FORECAST_MODELS.filter((m) => activeModels.includes(m.key)),
+    [activeModels]
+  );
 
   const togglePin = (key) => {
     setPinnedTrace((prev) => (prev === key ? null : key));
   };
 
-  const getOpacity = (key) => {
-    if (!spotlightKey) return 1;
-    return spotlightKey === key ? 1 : 0.16;
-  };
+  // ECharts Option Configuration
+  const option = useMemo(() => {
+    if (!series.length) return {};
 
-  const getWidth = (key, baseW) => {
-    if (spotlightKey === key) return baseW + 1.0;
-    return baseW;
-  };
+    const actualSeriesData = series.map((r) => Number(r.actual_demand) || null);
+
+    const isActualSpotlight = spotlightKey === "actual_demand";
+    const actualOpacity = spotlightKey ? (isActualSpotlight ? 1 : 0.16) : 1;
+    const actualWidth = isActualSpotlight ? 3.4 : 2.6;
+
+    // Series array
+    const chartSeries = [
+      {
+        name: "Actual Demand",
+        type: "line",
+        data: actualSeriesData,
+        smooth: 0.25,
+        showSymbol: false,
+        lineStyle: {
+          color: colors.ink,
+          width: actualWidth,
+          opacity: actualOpacity,
+        },
+        itemStyle: {
+          color: colors.ink,
+        },
+        z: 10,
+        // Peak callout marker & target dot
+        markPoint:
+          peakIndex >= 0
+            ? {
+                silent: true,
+                data: [
+                  {
+                    coord: [peakIndex, peakActual],
+                    value: `PEAK ${Math.round(peakActual).toLocaleString()} MWh`,
+                    symbol: "roundRect",
+                    symbolSize: [148, 24],
+                    symbolOffset: [0, -18],
+                    itemStyle: {
+                      color: colors.paper,
+                      borderColor: colors.signal,
+                      borderWidth: 1.5,
+                      shadowBlur: 4,
+                      shadowColor: "rgba(0,0,0,0.15)",
+                    },
+                    label: {
+                      show: true,
+                      formatter: (p) => p.value,
+                      color: colors.signal,
+                      fontFamily: colors.fontMono,
+                      fontSize: 10,
+                      fontWeight: 600,
+                      align: "center",
+                      verticalAlign: "middle",
+                    },
+                  },
+                  {
+                    coord: [peakIndex, peakActual],
+                    symbol: "circle",
+                    symbolSize: 6,
+                    itemStyle: {
+                      color: colors.signal,
+                      borderColor: colors.paper,
+                      borderWidth: 1.5,
+                    },
+                    label: { show: false },
+                  },
+                ],
+              }
+            : undefined,
+        // Vertical dashed guideline under the peak
+        markLine:
+          peakIndex >= 0
+            ? {
+                silent: true,
+                symbol: "none",
+                data: [
+                  {
+                    xAxis: peakIndex,
+                    lineStyle: {
+                      color: colors.signal,
+                      type: "dashed",
+                      width: 1,
+                      opacity: 0.5,
+                    },
+                    label: { show: false },
+                  },
+                ],
+              }
+            : undefined,
+      },
+    ];
+
+    // Add forecast model traces
+    for (const spec of enabledSpecs) {
+      const isSpotlight = spotlightKey === spec.key;
+      const opacity = spotlightKey ? (isSpotlight ? 1 : 0.15) : 1;
+      const baseWidth = spec.strokeWidth || 1.8;
+      const width = isSpotlight ? baseWidth + 1.2 : baseWidth;
+      const modelColor = getModelEChartsColor(spec.key, colors);
+
+      const isDashed = Boolean(spec.strokeDasharray);
+      const isStacking = spec.key === "Stacking_Ensemble";
+
+      chartSeries.push({
+        name: spec.label,
+        type: "line",
+        data: series.map((r) => Number(r[spec.key]) || null),
+        smooth: 0.25,
+        showSymbol: false,
+        lineStyle: {
+          color: modelColor,
+          width,
+          opacity,
+          type: isDashed ? "dashed" : "solid",
+        },
+        itemStyle: {
+          color: modelColor,
+        },
+        z: isStacking ? 9 : 5,
+      });
+    }
+
+    return {
+      backgroundColor: "transparent",
+      animation: true,
+      animationDuration: 520,
+      animationDurationUpdate: 450,
+      animationEasing: "cubicOut",
+      animationEasingUpdate: "cubicOut",
+      grid: {
+        top: 36,
+        left: 56,
+        right: 22,
+        bottom: 46,
+        containLabel: false,
+      },
+      tooltip: {
+        trigger: "axis",
+        backgroundColor: colors.paper,
+        borderColor: colors.ink,
+        borderWidth: 1,
+        padding: [8, 12],
+        textStyle: {
+          fontFamily: colors.fontMono,
+          fontSize: 11.5,
+          color: colors.ink,
+        },
+        axisPointer: {
+          type: "cross",
+          lineStyle: {
+            color: colors.ink,
+            type: "dashed",
+            width: 1,
+          },
+          label: {
+            backgroundColor: colors.ink,
+            color: colors.paper,
+            fontFamily: colors.fontMono,
+            fontSize: 10,
+          },
+        },
+        formatter: (params) => {
+          if (!params || !params.length) return "";
+          const time = params[0].axisValueLabel || "";
+          const header = `<div style="font-weight:600;margin-bottom:6px;border-bottom:1px solid ${colors.rule};padding-bottom:3px;">${time} UTC</div>`;
+
+          // Sort descending by value
+          const sorted = [...params].sort(
+            (a, b) => (Number(b.value) || 0) - (Number(a.value) || 0)
+          );
+
+          const rows = sorted
+            .map((item) => {
+              const val = Number(item.value);
+              const formattedVal = Number.isFinite(val)
+                ? `${val.toLocaleString(undefined, { maximumFractionDigits: 1 })} MWh`
+                : "--";
+              const isActual = item.seriesName === "Actual Demand";
+              const fontWeight = isActual || item.seriesName.includes("Stacking") ? 600 : 400;
+
+              return `
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;margin:2px 0;">
+                  <span style="display:inline-flex;align-items:center;gap:6px;font-weight:${fontWeight};">
+                    <span style="display:inline-block;width:9px;height:3px;background-color:${item.color};"></span>
+                    <span>${item.seriesName}</span>
+                  </span>
+                  <span style="font-weight:500;">${formattedVal}</span>
+                </div>
+              `;
+            })
+            .join("");
+
+          return `<div class="gp-tooltip" style="min-width:210px;">${header}${rows}</div>`;
+        },
+      },
+      xAxis: {
+        type: "category",
+        data: timestamps,
+        boundaryGap: false,
+        axisLine: {
+          lineStyle: { color: colors.ink, width: 1 },
+        },
+        axisTick: {
+          lineStyle: { color: colors.ink },
+        },
+        axisLabel: {
+          color: colors.graphite,
+          fontFamily: colors.fontMono,
+          fontSize: 10,
+          formatter: (ts) => formatAxisStamp(ts),
+          margin: 10,
+        },
+        splitLine: { show: false },
+      },
+      yAxis: {
+        type: "value",
+        name: "MWh",
+        nameTextStyle: {
+          color: colors.graphite,
+          fontFamily: colors.fontMono,
+          fontSize: 10,
+          align: "right",
+          padding: [0, 6, 0, 0],
+        },
+        scale: true,
+        min: (val) => {
+          const span = Math.max(val.max - val.min, 100);
+          return Math.max(0, Math.floor((val.min - span * 0.08) / 50) * 50);
+        },
+        max: (val) => {
+          const span = Math.max(val.max - val.min, 100);
+          return Math.ceil((val.max + span * 0.16) / 50) * 50;
+        },
+        axisLine: {
+          show: true,
+          lineStyle: { color: colors.ink, width: 1 },
+        },
+        axisTick: {
+          show: true,
+          lineStyle: { color: colors.ink },
+        },
+        axisLabel: {
+          color: colors.graphite,
+          fontFamily: colors.fontMono,
+          fontSize: 10,
+          formatter: (v) => Number(v).toLocaleString(),
+        },
+        splitLine: {
+          show: true,
+          lineStyle: {
+            color: colors.grid,
+            type: "dashed",
+          },
+        },
+      },
+      // Native ECharts DataZoom (Mouse-wheel + Drag + Slider)
+      dataZoom: [
+        {
+          type: "inside",
+          zoomOnMouseWheel: true,
+          moveOnMouseMove: true,
+          moveOnMouseWheel: false,
+        },
+        {
+          type: "slider",
+          bottom: 4,
+          height: 18,
+          borderColor: colors.rule,
+          backgroundColor: colors.vellum,
+          fillerColor: colors.isDark ? "rgba(255, 89, 54, 0.22)" : "rgba(201, 56, 24, 0.16)",
+          handleStyle: {
+            color: colors.signal,
+            borderColor: colors.paper,
+            borderWidth: 1.5,
+          },
+          moveHandleStyle: {
+            color: colors.graphite,
+          },
+          textStyle: {
+            color: colors.graphite,
+            fontFamily: colors.fontMono,
+            fontSize: 9.5,
+          },
+          dataBackground: {
+            lineStyle: { color: colors.graphite, width: 1 },
+            areaStyle: { color: colors.rule },
+          },
+          selectedDataBackground: {
+            lineStyle: { color: colors.signal, width: 1.5 },
+            areaStyle: { color: colors.signal, opacity: 0.2 },
+          },
+        },
+      ],
+      series: chartSeries,
+    };
+  }, [
+    series,
+    timestamps,
+    enabledSpecs,
+    colors,
+    spotlightKey,
+    peakIndex,
+    peakActual,
+  ]);
+
+  // Toolbar Actions via ECharts dispatchAction
+  const handleZoomIn = useCallback(() => {
+    const inst = echartsRef.current?.getEchartsInstance();
+    if (!inst) return;
+    const currentOption = inst.getOption();
+    const zoom = currentOption.dataZoom?.[0] || {};
+    const start = zoom.start ?? 0;
+    const end = zoom.end ?? 100;
+    const center = (start + end) / 2;
+    const span = (end - start) * 0.7; // zoom in by 30%
+    const nextStart = Math.max(0, center - span / 2);
+    const nextEnd = Math.min(100, center + span / 2);
+    inst.dispatchAction({
+      type: "dataZoom",
+      start: nextStart,
+      end: nextEnd,
+    });
+  }, []);
+
+  const handleZoomOut = useCallback(() => {
+    const inst = echartsRef.current?.getEchartsInstance();
+    if (!inst) return;
+    const currentOption = inst.getOption();
+    const zoom = currentOption.dataZoom?.[0] || {};
+    const start = zoom.start ?? 0;
+    const end = zoom.end ?? 100;
+    const center = (start + end) / 2;
+    const span = Math.min(100, (end - start) / 0.7);
+    const nextStart = Math.max(0, center - span / 2);
+    const nextEnd = Math.min(100, center + span / 2);
+    inst.dispatchAction({
+      type: "dataZoom",
+      start: nextStart,
+      end: nextEnd,
+    });
+  }, []);
+
+  const handleReset = useCallback(() => {
+    const inst = echartsRef.current?.getEchartsInstance();
+    if (!inst) return;
+    inst.dispatchAction({
+      type: "dataZoom",
+      start: 0,
+      end: 100,
+    });
+  }, []);
+
+  const handlePanLeft = useCallback(() => {
+    const inst = echartsRef.current?.getEchartsInstance();
+    if (!inst) return;
+    const currentOption = inst.getOption();
+    const zoom = currentOption.dataZoom?.[0] || {};
+    const start = zoom.start ?? 0;
+    const end = zoom.end ?? 100;
+    const span = end - start;
+    const shift = span * 0.25;
+    const nextStart = Math.max(0, start - shift);
+    const nextEnd = nextStart + span;
+    inst.dispatchAction({
+      type: "dataZoom",
+      start: nextStart,
+      end: nextEnd,
+    });
+  }, []);
+
+  const handlePanRight = useCallback(() => {
+    const inst = echartsRef.current?.getEchartsInstance();
+    if (!inst) return;
+    const currentOption = inst.getOption();
+    const zoom = currentOption.dataZoom?.[0] || {};
+    const start = zoom.start ?? 0;
+    const end = zoom.end ?? 100;
+    const span = end - start;
+    const shift = span * 0.25;
+    const nextEnd = Math.min(100, end + shift);
+    const nextStart = nextEnd - span;
+    inst.dispatchAction({
+      type: "dataZoom",
+      start: nextStart,
+      end: nextEnd,
+    });
+  }, []);
+
+  // Listen for ECharts native datazoom events to update toolbar readout & parent metrics
+  const onEvents = useMemo(
+    () => ({
+      datazoom: () => {
+        const inst = echartsRef.current?.getEchartsInstance();
+        if (!inst || !totalPoints) return;
+        const currentOption = inst.getOption();
+        const zoom = currentOption.dataZoom?.[0] || {};
+        const start = zoom.start ?? 0;
+        const end = zoom.end ?? 100;
+        const span = Math.max(0.01, end - start);
+        const factor = 100 / span;
+        setZoomFactor(factor);
+        setIsZoomed(start > 1 || end < 99);
+
+        if (onZoomRangeChange) {
+          const sIdx = Math.max(0, Math.floor((start / 100) * totalPoints));
+          const eIdx = Math.min(totalPoints - 1, Math.ceil((end / 100) * totalPoints));
+          onZoomRangeChange(start > 1 || end < 99 ? [sIdx, eIdx] : null);
+        }
+      },
+    }),
+    [totalPoints, onZoomRangeChange]
+  );
+
+  if (!series.length) return null;
+
+  const tableSampleStep = Math.max(1, Math.floor(series.length / 12));
+  const sampledRows = series.filter(
+    (_, idx) => idx % tableSampleStep === 0 || idx === series.length - 1
+  );
 
   return (
-    <div ref={containerRef} className="instrument-frame containment-panel">
+    <div className="instrument-frame containment-panel">
       <div className="instrument-header">
         <div>
           <span className="kicker">STRIP-CHART RECORDER // 24H HORIZON</span>
@@ -231,23 +501,30 @@ export default function ForecastReadoutChart({
             {cityLabel} — Metered Load vs. Day-Ahead Ensemble Traces
           </h3>
           <p className="instrument-subtitle">
-            {series.length.toLocaleString()} hourly intervals ·{" "}
-            {String(series[0]?.timestamp).slice(0, 10)} to{" "}
-            {String(series[lastIndex]?.timestamp).slice(0, 10)} · Hover or click any pen below to
-            spotlight its trace
+            {isZoomed
+              ? `Zoom factor ${zoomFactor.toFixed(1)}x · Native wheel/drag zoom active · Double-click or click Reset for full archive`
+              : `${series.length.toLocaleString()} hourly intervals · ${String(
+                  series[0]?.timestamp
+                ).slice(0, 10)} to ${String(series[series.length - 1]?.timestamp).slice(
+                  0,
+                  10
+                )} · Use mouse-wheel or slider track below to zoom`}
           </p>
         </div>
 
-        {!compact && series.length > 48 && !isMobile && (
-          <button
-            type="button"
-            className="btn-quiet"
-            aria-pressed={showZoomBrush}
-            onClick={() => setShowZoomBrush((v) => !v)}
-          >
-            {showZoomBrush ? "Hide Time Zoom" : "Time Zoom Scrubber"}
-          </button>
-        )}
+        <div className="instrument-header-actions">
+          <ChartZoomToolbar
+            zoomFactor={zoomFactor}
+            isZoomed={isZoomed}
+            canZoomIn={zoomFactor < 15}
+            onZoomIn={handleZoomIn}
+            onZoomOut={handleZoomOut}
+            onReset={handleReset}
+            onPanLeft={handlePanLeft}
+            onPanRight={handlePanRight}
+            canZoom={series.length > 8}
+          />
+        </div>
       </div>
 
       {/* Interactive Multi-Pen Legend Bar (Hover or Click to Spotlight) */}
@@ -274,32 +551,28 @@ export default function ForecastReadoutChart({
         {enabledSpecs.map((spec) => {
           const isPinned = pinnedTrace === spec.key;
           const isDimmed = spotlightKey && spotlightKey !== spec.key;
+          const modelColor = getModelEChartsColor(spec.key, colors);
+
           return (
             <button
               key={spec.key}
               type="button"
-              className={`trace-pill ${isPinned ? "is-pinned" : ""} ${
-                isDimmed ? "is-dimmed" : ""
-              }`}
+              className={`trace-pill ${isPinned ? "is-pinned" : ""} ${isDimmed ? "is-dimmed" : ""}`}
               onMouseEnter={() => setHoveredTrace(spec.key)}
               onMouseLeave={() => setHoveredTrace(null)}
               onClick={() => togglePin(spec.key)}
               aria-pressed={isPinned}
             >
-              <svg width="18" height="8" viewBox="0 0 18 8" aria-hidden="true">
-                <line
-                  x1="0"
-                  y1="4"
-                  x2="18"
-                  y2="4"
-                  stroke={spec.color}
-                  strokeWidth={Math.max(2, spec.strokeWidth)}
-                  strokeDasharray={spec.strokeDasharray}
-                />
-              </svg>
-              <span style={{ color: spec.key === "Stacking_Ensemble" ? "var(--c-signal)" : "var(--c-ink)" }}>
-                {spec.shortLabel}
-              </span>
+              <span
+                aria-hidden="true"
+                style={{
+                  display: "inline-block",
+                  inlineSize: "14px",
+                  blockSize: "3px",
+                  backgroundColor: modelColor,
+                }}
+              />
+              <span>{spec.shortLabel}</span>
             </button>
           );
         })}
@@ -316,156 +589,23 @@ export default function ForecastReadoutChart({
         )}
       </div>
 
-      {/* Responsive 100% Width Plot Stage (Zero inner vertical scrollbars) */}
+      {/* Responsive ECharts Canvas Stage */}
       <div
         className="chart-stage"
-        style={{ blockSize: `${responsiveHeight + (showZoomBrush ? 38 : 0)}px` }}
+        onDoubleClick={handleReset}
+        style={{
+          blockSize: `${height}px`,
+          position: "relative",
+        }}
       >
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart
-            data={series}
-            syncId={syncId}
-            margin={{
-              top: 28,
-              right: isMobile ? 10 : 18,
-              left: isMobile ? -4 : 6,
-              bottom: 6,
-            }}
-          >
-            <CartesianGrid
-              stroke="var(--c-grid)"
-              strokeDasharray="2 3"
-              vertical={false}
-            />
-            <XAxis
-              dataKey="timestamp"
-              tickFormatter={(ts) => formatAxisStamp(ts, isMobile)}
-              minTickGap={isMobile ? 34 : 52}
-              stroke="var(--c-ink)"
-              tick={{
-                fontFamily: "var(--font-mono)",
-                fontSize: isMobile ? 9.5 : 10.5,
-                fill: "var(--c-graphite)",
-              }}
-              tickLine={{ stroke: "var(--c-ink)" }}
-            />
-            <YAxis
-              domain={yDomain}
-              width={isMobile ? 42 : 58}
-              tickFormatter={(v) => formatYAxisTick(v, isMobile)}
-              stroke="var(--c-ink)"
-              tick={{
-                fontFamily: "var(--font-mono)",
-                fontSize: isMobile ? 9.5 : 10.5,
-                fill: "var(--c-graphite)",
-              }}
-              tickLine={{ stroke: "var(--c-ink)" }}
-            />
-            <Tooltip
-              content={<ForecastTooltip />}
-              cursor={{ stroke: "var(--c-ink)", strokeWidth: 1, strokeDasharray: "3 3" }}
-              isAnimationActive={!reducedMotion}
-              animationDuration={110}
-            />
-
-            {/* Secondary & Baseline Models with Distinct Multi-Pen Colors */}
-            {enabledSpecs
-              .filter((m) => m.key !== "Stacking_Ensemble")
-              .map((spec) => (
-                <Line
-                  key={spec.key}
-                  type="monotone"
-                  dataKey={spec.key}
-                  stroke={spec.color}
-                  strokeWidth={getWidth(spec.key, spec.strokeWidth)}
-                  strokeOpacity={getOpacity(spec.key)}
-                  strokeDasharray={spec.strokeDasharray}
-                  dot={false}
-                  activeDot={{
-                    r: 4.5,
-                    fill: spec.color,
-                    stroke: "var(--c-paper)",
-                    strokeWidth: 1.5,
-                  }}
-                  isAnimationActive={!reducedMotion}
-                  animationDuration={520}
-                  animationEasing="ease-out"
-                />
-              ))}
-
-            {/* Metered Actual Load — Heavy Ink Line */}
-            <Line
-              type="monotone"
-              dataKey="actual_demand"
-              stroke="var(--c-ink)"
-              strokeWidth={getWidth("actual_demand", 2.6)}
-              strokeOpacity={getOpacity("actual_demand")}
-              dot={false}
-              activeDot={{
-                r: 5.5,
-                fill: "var(--c-ink)",
-                stroke: "var(--c-paper)",
-                strokeWidth: 2,
-              }}
-              isAnimationActive={!reducedMotion}
-              animationDuration={520}
-              animationEasing="ease-out"
-            />
-
-            {/* Primary Forecast — Signal Vermilion Pen */}
-            {activeModels.includes("Stacking_Ensemble") && (
-              <Line
-                type="monotone"
-                dataKey="Stacking_Ensemble"
-                stroke="var(--c-signal)"
-                strokeWidth={getWidth("Stacking_Ensemble", 2.3)}
-                strokeOpacity={getOpacity("Stacking_Ensemble")}
-                dot={false}
-                activeDot={{
-                  r: 5.5,
-                  fill: "var(--c-signal)",
-                  stroke: "var(--c-paper)",
-                  strokeWidth: 2,
-                }}
-                isAnimationActive={!reducedMotion}
-                animationDuration={560}
-                animationEasing="ease-out"
-              />
-            )}
-
-            {/* Collision-free Peak Demand Instrument Callout */}
-            {peakPoint && (
-              <>
-                <ReferenceLine
-                  x={peakPoint.timestamp}
-                  stroke="var(--c-rule-strong)"
-                  strokeDasharray="2 3"
-                />
-                <ReferenceDot
-                  x={peakPoint.timestamp}
-                  y={peakPoint.actual_demand}
-                  shape={(props) => (
-                    <PeakCalloutShape
-                      {...props}
-                      valueText={`PEAK ${Math.round(peakPoint.actual_demand).toLocaleString()} MWh`}
-                    />
-                  )}
-                />
-              </>
-            )}
-
-            {showZoomBrush && !isMobile && (
-              <Brush
-                dataKey="timestamp"
-                height={26}
-                stroke="var(--c-ink)"
-                fill="var(--c-vellum)"
-                tickFormatter={(ts) => formatAxisStamp(ts, true)}
-                travellerWidth={8}
-              />
-            )}
-          </LineChart>
-        </ResponsiveContainer>
+        <ReactECharts
+          ref={echartsRef}
+          option={option}
+          notMerge={false}
+          lazyUpdate={true}
+          style={{ width: "100%", height: "100%" }}
+          onEvents={onEvents}
+        />
       </div>
 
       {!compact && (

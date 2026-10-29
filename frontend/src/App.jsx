@@ -94,25 +94,7 @@ export default function App() {
         </button>
 
         <div className="masthead-controls">
-          {/* Backend Link Status Indicator (text + shape, never color alone) */}
-          <span
-            className="font-mono"
-            style={{
-              fontSize: "0.7rem",
-              color: health.state === "err" ? "var(--c-signal)" : "var(--c-graphite)",
-              padding: "0.24rem 0.5rem",
-              border: "1px solid var(--c-rule)",
-            }}
-            title={`API Base: ${API_BASE}`}
-          >
-            {health.state === "ok"
-              ? `LINK OK · ${Number(health.rows).toLocaleString()} TEST HRS`
-              : health.state === "err"
-                ? "API OFFLINE"
-                : "CHECKING API..."}
-          </span>
-
-          {/* Tri-State Theme Selector (Light default, Dark, System with resolved state) */}
+          {/* Dual-State Theme Selector (Light default, Dark) */}
           <div
             className="segmented-control"
             role="radiogroup"
@@ -269,7 +251,7 @@ export default function App() {
                 cursor: "pointer",
               }}
             >
-              Methodology &amp; API Docs
+              Methodology &amp; Documentation
             </button>
           )}
         </div>

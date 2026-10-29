@@ -2,12 +2,24 @@ import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 
 import { CLUSTER_GLYPHS, getCityMeta } from "../../constants/cities";
 import { useContainerWidth, useReducedMotion } from "../../hooks/useChartEnvironment";
 import { ClusterGlyph } from "../StatusViews";
+import ChartZoomToolbar from "./ChartZoomToolbar";
 
 const VIEW_W = 720;
 const VIEW_H = 440;
 const PAD = { top: 26, right: 24, bottom: 38, left: 48 };
 const PLOT_W = VIEW_W - PAD.left - PAD.right;
 const PLOT_H = VIEW_H - PAD.top - PAD.bottom;
+const MAX_SCALE = 10;
+
+function clamp(val, lo, hi) {
+  return Math.max(lo, Math.min(hi, val));
+}
+
+function clampCenter(c, scale) {
+  if (scale <= 1) return 0.5;
+  const half = 0.5 / scale;
+  return clamp(c, half, 1 - half);
+}
 
 function glyphSubpath(shape, x, y, r = 2.9) {
   const cx = Number(x.toFixed(1));
@@ -44,14 +56,14 @@ function glyphSubpath(shape, x, y, r = 2.9) {
   }
 }
 
-function computeTargetLayout(points, projection, selectedK) {
+function computeNormalizedLayout(points, projection, selectedK) {
   if (!points.length) {
     return {
       coords: [],
-      xTicks: [],
-      yTicks: [],
-      zeroX: null,
-      zeroY: null,
+      dMinX: -1,
+      dMaxX: 1,
+      dMinY: -1,
+      dMaxY: 1,
       clusterStats: [],
     };
   }
@@ -79,9 +91,8 @@ function computeTargetLayout(points, projection, selectedK) {
   const dMaxX = maxX + padX;
   const dMinY = minY - padY;
   const dMaxY = maxY + padY;
-
-  const toScreenX = (v) => PAD.left + ((v - dMinX) / (dMaxX - dMinX)) * PLOT_W;
-  const toScreenY = (v) => PAD.top + PLOT_H - ((v - dMinY) / (dMaxY - dMinY)) * PLOT_H;
+  const spanX = Math.max(dMaxX - dMinX, 1e-6);
+  const spanY = Math.max(dMaxY - dMinY, 1e-6);
 
   const accum = Array.from({ length: selectedK }, (_, c) => ({
     cid: c,
@@ -100,20 +111,17 @@ function computeTargetLayout(points, projection, selectedK) {
     return {
       ...p,
       cid,
-      tx: toScreenX(Number(p[xKey])),
-      ty: toScreenY(Number(p[yKey])),
+      tux: (Number(p[xKey]) - dMinX) / spanX,
+      tuy: (Number(p[yKey]) - dMinY) / spanY,
     };
   });
 
-  const makeTicks = (lo, hi, steps = 5) =>
-    Array.from({ length: steps }, (_, i) => lo + ((hi - lo) * i) / (steps - 1));
-
   return {
     coords,
-    xTicks: makeTicks(dMinX, dMaxX, 5).map((v) => ({ val: v, pos: toScreenX(v) })),
-    yTicks: makeTicks(dMinY, dMaxY, 5).map((v) => ({ val: v, pos: toScreenY(v) })),
-    zeroX: dMinX <= 0 && dMaxX >= 0 ? toScreenX(0) : null,
-    zeroY: dMinY <= 0 && dMaxY >= 0 ? toScreenY(0) : null,
+    dMinX,
+    dMaxX,
+    dMinY,
+    dMaxY,
     clusterStats: accum
       .filter((a) => a.count > 0)
       .map((a) => ({
@@ -128,9 +136,9 @@ function computeTargetLayout(points, projection, selectedK) {
 
 /**
  * Interactive 2D Manifold Scatter Plot with:
- * - 60fps requestAnimationFrame coordinate morphing between PCA and t-SNE
+ * - 60fps requestAnimationFrame coordinate morphing across PCA/t-SNE, city scope, and k changes
+ * - Full 2D Zoom & Pan (+ / - / wheel / rubber-band box-zoom at 1x / 2D drag-pan when zoomed)
  * - Interactive cluster spotlighting (hover or pin C0..Ck-1)
- * - Smooth responsive SVG aspect adaptation across mobile, tablet, and desktop
  */
 export default function ClusterScatterPlot({
   points = [],
@@ -139,14 +147,26 @@ export default function ClusterScatterPlot({
 }) {
   const [containerRef] = useContainerWidth(720);
   const reducedMotion = useReducedMotion();
+  const stageRef = useRef(null);
   const svgRef = useRef(null);
-  const prevPositionsRef = useRef([]);
+  const prevNormRef = useRef([]);
+  const clipId = useId();
+  const captionId = useId();
+
   const [hoveredPoint, setHoveredPoint] = useState(null);
   const [hoveredCluster, setHoveredCluster] = useState(null);
   const [pinnedCluster, setPinnedCluster] = useState(null);
-  const captionId = useId();
+
+  // 2D Zoom & Pan State in normalized [0..1] manifold space
+  const [zoomView, setZoomView] = useState({ scale: 1, cx: 0.5, cy: 0.5 });
+  const [wheelActive, setWheelActive] = useState(false);
+  const [dragBox, setDragBox] = useState(null);
+  const [isPanning, setIsPanning] = useState(false);
+  const gestureRef = useRef(null);
+  const [isMorphing, setIsMorphing] = useState(false);
 
   const spotlightCluster = hoveredCluster ?? pinnedCluster;
+  const isZoomed = zoomView.scale > 1.02;
 
   useEffect(() => {
     if (pinnedCluster !== null && pinnedCluster >= selectedK) {
@@ -154,48 +174,77 @@ export default function ClusterScatterPlot({
     }
   }, [selectedK, pinnedCluster]);
 
+  // Reset 2D zoom when projection embedding switches (PCA <-> t-SNE have distinct axes)
+  useEffect(() => {
+    setZoomView({ scale: 1, cx: 0.5, cy: 0.5 });
+  }, [projection]);
+
   const targetLayout = useMemo(
-    () => computeTargetLayout(points, projection, selectedK),
+    () => computeNormalizedLayout(points, projection, selectedK),
     [points, projection, selectedK]
   );
 
-  const [animatedCoords, setAnimatedCoords] = useState(targetLayout.coords);
+  const [animatedNorm, setAnimatedNorm] = useState(targetLayout.coords);
 
-  // Smooth 60fps coordinate morph when switching PCA <-> t-SNE or re-clustering
+  // Smooth 60fps coordinate morph when switching PCA <-> t-SNE, city scope, or k
   useEffect(() => {
     const target = targetLayout.coords;
     if (!target.length) {
-      setAnimatedCoords([]);
-      prevPositionsRef.current = [];
+      setAnimatedNorm([]);
+      prevNormRef.current = [];
       return undefined;
     }
 
-    const prev = prevPositionsRef.current;
-    if (reducedMotion || prev.length !== target.length) {
-      const snapped = target.map((pt) => ({ ...pt, sx: pt.tx, sy: pt.ty }));
-      setAnimatedCoords(snapped);
-      prevPositionsRef.current = snapped;
+    const prev = prevNormRef.current;
+    if (reducedMotion || prev.length === 0) {
+      const snapped = target.map((pt) => ({ ...pt, ux: pt.tux, uy: pt.tuy }));
+      setAnimatedNorm(snapped);
+      prevNormRef.current = snapped;
+      setIsMorphing(false);
       return undefined;
     }
 
-    const startSnap = prev.map((p) => ({ sx: p.sx, sy: p.sy }));
+    // Map every target point from previous point (modulo length so city switches also morph smoothly!)
+    const startSnap = target.map((_, i) => {
+      const src = prev[i % prev.length];
+      return { ux: src.ux ?? src.tux ?? 0.5, uy: src.uy ?? src.tuy ?? 0.5 };
+    });
+
+    // Check if coordinates actually moved (e.g. PCA <-> t-SNE or city switch)
+    let maxDelta = 0;
+    for (let i = 0; i < Math.min(target.length, 40); i += 1) {
+      const d =
+        Math.abs(target[i].tux - startSnap[i].ux) + Math.abs(target[i].tuy - startSnap[i].uy);
+      if (d > maxDelta) maxDelta = d;
+    }
+
+    if (maxDelta < 1e-4) {
+      const updated = target.map((pt) => ({ ...pt, ux: pt.tux, uy: pt.tuy }));
+      setAnimatedNorm(updated);
+      prevNormRef.current = updated;
+      setIsMorphing(false);
+      return undefined;
+    }
+
+    setIsMorphing(true);
     const duration = 420;
     const t0 = performance.now();
     let rafId = 0;
 
     const tick = (now) => {
       const rawT = Math.min(1, (now - t0) / duration);
-      // Cubic ease-out
       const ease = 1 - Math.pow(1 - rawT, 3);
       const frame = target.map((pt, i) => ({
         ...pt,
-        sx: startSnap[i].sx + (pt.tx - startSnap[i].sx) * ease,
-        sy: startSnap[i].sy + (pt.ty - startSnap[i].sy) * ease,
+        ux: startSnap[i].ux + (pt.tux - startSnap[i].ux) * ease,
+        uy: startSnap[i].uy + (pt.tuy - startSnap[i].uy) * ease,
       }));
-      setAnimatedCoords(frame);
-      prevPositionsRef.current = frame;
+      setAnimatedNorm(frame);
+      prevNormRef.current = frame;
       if (rawT < 1) {
         rafId = requestAnimationFrame(tick);
+      } else {
+        setIsMorphing(false);
       }
     };
 
@@ -203,7 +252,74 @@ export default function ClusterScatterPlot({
     return () => cancelAnimationFrame(rafId);
   }, [targetLayout, reducedMotion]);
 
-  const { clusterPaths, centroids } = useMemo(() => {
+  // Zoom & Pan Helpers
+  const zoomAt = useCallback((factor, rx = 0.5, ry = 0.5) => {
+    setZoomView((prev) => {
+      const nextScale = clamp(prev.scale * factor, 1, MAX_SCALE);
+      if (nextScale <= 1.01) {
+        return { scale: 1, cx: 0.5, cy: 0.5 };
+      }
+      const prevHalf = 0.5 / prev.scale;
+      const uMinX = prev.cx - prevHalf;
+      const uMinY = prev.cy - prevHalf;
+      const anchorUx = uMinX + rx / prev.scale;
+      const anchorUy = uMinY + ry / prev.scale;
+      const nextCx = clampCenter(anchorUx - rx / nextScale + 0.5 / nextScale, nextScale);
+      const nextCy = clampCenter(anchorUy - ry / nextScale + 0.5 / nextScale, nextScale);
+      return { scale: nextScale, cx: nextCx, cy: nextCy };
+    });
+  }, []);
+
+  const resetZoom = useCallback(() => {
+    setZoomView({ scale: 1, cx: 0.5, cy: 0.5 });
+    setDragBox(null);
+  }, []);
+
+  const panStepX = useCallback((dir) => {
+    setZoomView((prev) => {
+      if (prev.scale <= 1.01) return prev;
+      const step = (0.24 / prev.scale) * dir;
+      return { ...prev, cx: clampCenter(prev.cx + step, prev.scale) };
+    });
+  }, []);
+
+  // Native non-passive wheel listener for cursor-anchored 2D zoom & trackpad pan
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return undefined;
+
+    const onWheel = (e) => {
+      if (!e.ctrlKey && !e.metaKey && !e.shiftKey && !wheelActive && !isZoomed) {
+        return;
+      }
+      e.preventDefault();
+      if (!svgRef.current) return;
+      const rect = svgRef.current.getBoundingClientRect();
+      const mx = ((e.clientX - rect.left) / Math.max(1, rect.width)) * VIEW_W;
+      const my = ((e.clientY - rect.top) / Math.max(1, rect.height)) * VIEW_H;
+      const rx = clamp((mx - PAD.left) / PLOT_W, 0, 1);
+      const ry = clamp(1 - (my - PAD.top) / PLOT_H, 0, 1);
+      const factor = e.deltaY < 0 ? 1.28 : 1 / 1.28;
+      zoomAt(factor, rx, ry);
+    };
+
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [wheelActive, isZoomed, zoomAt]);
+
+  // Project normalized animated coordinates through active 2D zoomView
+  const { screenPoints, clusterPaths, centroids, xTicks, yTicks, zeroX, zeroY } = useMemo(() => {
+    const half = 0.5 / zoomView.scale;
+    const uMinX = zoomView.cx - half;
+    const uMaxX = zoomView.cx + half;
+    const uMinY = zoomView.cy - half;
+    const uMaxY = zoomView.cy + half;
+    const uSpanX = Math.max(uMaxX - uMinX, 1e-6);
+    const uSpanY = Math.max(uMaxY - uMinY, 1e-6);
+
+    const toSx = (ux) => PAD.left + ((ux - uMinX) / uSpanX) * PLOT_W;
+    const toSy = (uy) => PAD.top + PLOT_H - ((uy - uMinY) / uSpanY) * PLOT_H;
+
     const pathBuckets = Array.from({ length: selectedK }, () => []);
     const centAccum = Array.from({ length: selectedK }, (_, c) => ({
       cid: c,
@@ -212,20 +328,60 @@ export default function ClusterScatterPlot({
       sumY: 0,
     }));
 
-    for (const pt of animatedCoords) {
+    const projected = animatedNorm.map((pt) => {
+      const ux = pt.ux ?? pt.tux;
+      const uy = pt.uy ?? pt.tuy;
+      const sx = toSx(ux);
+      const sy = toSy(uy);
       const cid = pt.cid;
       const spec = CLUSTER_GLYPHS[cid % CLUSTER_GLYPHS.length];
-      const sx = pt.sx ?? pt.tx;
-      const sy = pt.sy ?? pt.ty;
-      pathBuckets[cid]?.push(glyphSubpath(spec.shape, sx, sy, 2.85));
+
+      if (
+        sx >= PAD.left - 8 &&
+        sx <= PAD.left + PLOT_W + 8 &&
+        sy >= PAD.top - 8 &&
+        sy <= PAD.top + PLOT_H + 8
+      ) {
+        pathBuckets[cid]?.push(glyphSubpath(spec.shape, sx, sy, 2.9));
+      }
       if (centAccum[cid]) {
         centAccum[cid].count += 1;
         centAccum[cid].sumX += sx;
         centAccum[cid].sumY += sy;
       }
-    }
+      return { ...pt, sx, sy };
+    });
+
+    const dataSpanX = targetLayout.dMaxX - targetLayout.dMinX;
+    const dataSpanY = targetLayout.dMaxY - targetLayout.dMinY;
+    const visMinX = targetLayout.dMinX + uMinX * dataSpanX;
+    const visMaxX = targetLayout.dMinX + uMaxX * dataSpanX;
+    const visMinY = targetLayout.dMinY + uMinY * dataSpanY;
+    const visMaxY = targetLayout.dMinY + uMaxY * dataSpanY;
+
+    const ticksX = Array.from({ length: 5 }, (_, i) => {
+      const frac = i / 4;
+      return {
+        val: visMinX + (visMaxX - visMinX) * frac,
+        pos: PAD.left + PLOT_W * frac,
+      };
+    });
+
+    const ticksY = Array.from({ length: 5 }, (_, i) => {
+      const frac = i / 4;
+      return {
+        val: visMinY + (visMaxY - visMinY) * frac,
+        pos: PAD.top + PLOT_H - PLOT_H * frac,
+      };
+    });
+
+    const zUx = (0 - targetLayout.dMinX) / Math.max(dataSpanX, 1e-6);
+    const zUy = (0 - targetLayout.dMinY) / Math.max(dataSpanY, 1e-6);
+    const zx = zUx >= uMinX && zUx <= uMaxX ? toSx(zUx) : null;
+    const zy = zUy >= uMinY && zUy <= uMaxY ? toSy(zUy) : null;
 
     return {
+      screenPoints: projected,
       clusterPaths: pathBuckets.map((segments, cid) => {
         const spec = CLUSTER_GLYPHS[cid % CLUSTER_GLYPHS.length];
         const isStrokeOnly =
@@ -244,35 +400,127 @@ export default function ClusterScatterPlot({
           sx: a.sumX / a.count,
           sy: a.sumY / a.count,
         })),
+      xTicks: ticksX,
+      yTicks: ticksY,
+      zeroX: zx,
+      zeroY: zy,
     };
-  }, [animatedCoords, selectedK]);
+  }, [animatedNorm, zoomView, selectedK, targetLayout]);
+
+  const toSvgCoords = (e) => {
+    const rect = svgRef.current.getBoundingClientRect();
+    return {
+      mx: ((e.clientX - rect.left) / Math.max(1, rect.width)) * VIEW_W,
+      my: ((e.clientY - rect.top) / Math.max(1, rect.height)) * VIEW_H,
+    };
+  };
+
+  const handlePointerDown = useCallback(
+    (e) => {
+      if (!svgRef.current || e.button !== 0) return;
+      const { mx, my } = toSvgCoords(e);
+      if (
+        mx < PAD.left ||
+        mx > PAD.left + PLOT_W ||
+        my < PAD.top ||
+        my > PAD.top + PLOT_H
+      ) {
+        return;
+      }
+
+      if (isZoomed) {
+        gestureRef.current = {
+          mode: "pan",
+          startMx: mx,
+          startMy: my,
+          startCx: zoomView.cx,
+          startCy: zoomView.cy,
+          scale: zoomView.scale,
+        };
+        setIsPanning(true);
+      } else {
+        gestureRef.current = {
+          mode: "box",
+          x0: mx,
+          y0: my,
+          x1: mx,
+          y1: my,
+        };
+        setDragBox({ x0: mx, y0: my, x1: mx, y1: my });
+      }
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+    },
+    [isZoomed, zoomView]
+  );
 
   const handlePointerMove = useCallback(
     (e) => {
-      if (!svgRef.current || !animatedCoords.length) return;
-      const rect = svgRef.current.getBoundingClientRect();
-      const mx = ((e.clientX - rect.left) / rect.width) * VIEW_W;
-      const my = ((e.clientY - rect.top) / rect.height) * VIEW_H;
+      if (!svgRef.current || !screenPoints.length) return;
+      const { mx, my } = toSvgCoords(e);
+
+      const g = gestureRef.current;
+      if (g?.mode === "pan") {
+        const dx = mx - g.startMx;
+        const dy = my - g.startMy;
+        const nextCx = clampCenter(g.startCx - dx / PLOT_W / g.scale, g.scale);
+        const nextCy = clampCenter(g.startCy + dy / PLOT_H / g.scale, g.scale);
+        setZoomView((prev) => ({ ...prev, cx: nextCx, cy: nextCy }));
+        setHoveredPoint(null);
+        return;
+      }
+
+      if (g?.mode === "box") {
+        const clampedX = clamp(mx, PAD.left, PAD.left + PLOT_W);
+        const clampedY = clamp(my, PAD.top, PAD.top + PLOT_H);
+        g.x1 = clampedX;
+        g.y1 = clampedY;
+        setDragBox({ x0: g.x0, y0: g.y0, x1: clampedX, y1: clampedY });
+        setHoveredPoint(null);
+        return;
+      }
 
       let best = null;
       let bestDistSq = 289;
-      for (let i = 0; i < animatedCoords.length; i += 1) {
-        const pt = animatedCoords[i];
+      for (let i = 0; i < screenPoints.length; i += 1) {
+        const pt = screenPoints[i];
         if (spotlightCluster !== null && pt.cid !== spotlightCluster) continue;
-        const sx = pt.sx ?? pt.tx;
-        const sy = pt.sy ?? pt.ty;
-        const dx = sx - mx;
-        const dy = sy - my;
+        const dx = pt.sx - mx;
+        const dy = pt.sy - my;
         const d2 = dx * dx + dy * dy;
         if (d2 < bestDistSq) {
           bestDistSq = d2;
-          best = { ...pt, sx, sy };
+          best = pt;
         }
       }
       setHoveredPoint(best);
     },
-    [animatedCoords, spotlightCluster]
+    [screenPoints, spotlightCluster]
   );
+
+  const handlePointerUp = useCallback(() => {
+    const g = gestureRef.current;
+    gestureRef.current = null;
+    setIsPanning(false);
+
+    if (g?.mode === "box") {
+      setDragBox(null);
+      const left = Math.min(g.x0, g.x1);
+      const right = Math.max(g.x0, g.x1);
+      const top = Math.min(g.y0, g.y1);
+      const bottom = Math.max(g.y0, g.y1);
+      if (right - left >= 18 && bottom - top >= 18) {
+        const midRx = ((left + right) / 2 - PAD.left) / PLOT_W;
+        const midRy = 1 - ((top + bottom) / 2 - PAD.top) / PLOT_H;
+        const frac = Math.max((right - left) / PLOT_W, (bottom - top) / PLOT_H);
+        const nextScale = clamp(1 / frac, 1.25, MAX_SCALE);
+        setZoomView({
+          scale: nextScale,
+          cx: clampCenter(midRx, nextScale),
+          cy: clampCenter(midRy, nextScale),
+        });
+      }
+    }
+  }, []);
 
   if (!points.length) return null;
 
@@ -287,35 +535,58 @@ export default function ClusterScatterPlot({
             Consumption–Weather State Space ({points.length.toLocaleString()} Hourly Vectors)
           </h3>
           <p className="instrument-subtitle">
-            Toggle PCA / t-SNE to animate coordinate manifold · Hover or click C0–C
-            {selectedK - 1} to isolate a regime
+            {isZoomed
+              ? `Zoomed ${zoomView.scale.toFixed(1)}x — Drag plot to pan 2D · Scroll wheel to zoom · Double-click to reset`
+              : `Drag a box on the plane to zoom in 2D · Toggle PCA / t-SNE to animate manifold`}
           </p>
         </div>
 
-        <div className="trace-key-list" role="toolbar" aria-label="Cluster spotlight filters">
-          {targetLayout.clusterStats.map((st) => {
-            const isPinned = pinnedCluster === st.cid;
-            const isDimmed = spotlightCluster !== null && spotlightCluster !== st.cid;
-            return (
-              <button
-                key={st.cid}
-                type="button"
-                className={`trace-pill ${isPinned ? "is-pinned" : ""} ${
-                  isDimmed ? "is-dimmed" : ""
-                }`}
-                onMouseEnter={() => setHoveredCluster(st.cid)}
-                onMouseLeave={() => setHoveredCluster(null)}
-                onClick={() => setPinnedCluster((prev) => (prev === st.cid ? null : st.cid))}
-                aria-pressed={isPinned}
-              >
-                <ClusterGlyph clusterId={st.cid} size={11} />
-                <span>
-                  C{st.cid} ({st.sharePct}%)
-                </span>
-              </button>
-            );
-          })}
+        <div className="instrument-header-actions">
+          <ChartZoomToolbar
+            zoomFactor={zoomView.scale}
+            isZoomed={isZoomed}
+            canZoomIn={zoomView.scale < MAX_SCALE - 0.1}
+            onZoomIn={() => zoomAt(1.6, 0.5, 0.5)}
+            onZoomOut={() => zoomAt(1 / 1.6, 0.5, 0.5)}
+            onReset={resetZoom}
+            onPanLeft={() => panStepX(-1)}
+            onPanRight={() => panStepX(1)}
+            wheelActive={wheelActive}
+            onToggleWheel={() => setWheelActive((v) => !v)}
+            canZoom={points.length > 0}
+          />
         </div>
+      </div>
+
+      {/* Cluster Spotlight Pills */}
+      <div
+        className="trace-key-list"
+        role="toolbar"
+        aria-label="Cluster spotlight filters"
+        style={{ marginBlockEnd: "0.65rem" }}
+      >
+        {targetLayout.clusterStats.map((st) => {
+          const isPinned = pinnedCluster === st.cid;
+          const isDimmed = spotlightCluster !== null && spotlightCluster !== st.cid;
+          return (
+            <button
+              key={st.cid}
+              type="button"
+              className={`trace-pill ${isPinned ? "is-pinned" : ""} ${
+                isDimmed ? "is-dimmed" : ""
+              }`}
+              onMouseEnter={() => setHoveredCluster(st.cid)}
+              onMouseLeave={() => setHoveredCluster(null)}
+              onClick={() => setPinnedCluster((prev) => (prev === st.cid ? null : st.cid))}
+              aria-pressed={isPinned}
+            >
+              <ClusterGlyph clusterId={st.cid} size={11} />
+              <span>
+                C{st.cid} ({st.sharePct}%)
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Fixed Instrument Telemetry Readout Bar */}
@@ -355,18 +626,34 @@ export default function ClusterScatterPlot({
         )}
       </div>
 
-      <div className="chart-stage">
+      <div ref={stageRef} onDoubleClick={resetZoom} className="chart-stage">
         <svg
           ref={svgRef}
           viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
-          style={{ inlineSize: "100%", blockSize: "auto", cursor: "crosshair" }}
+          style={{
+            inlineSize: "100%",
+            blockSize: "auto",
+            cursor: isPanning ? "grabbing" : isZoomed ? "grab" : "crosshair",
+            touchAction: isZoomed ? "none" : "auto",
+          }}
+          onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
-          onPointerLeave={() => setHoveredPoint(null)}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          onPointerLeave={() => {
+            if (!gestureRef.current) setHoveredPoint(null);
+          }}
           role="img"
           aria-label={`${projection.toUpperCase()} scatter projection of ${
             points.length
           } hourly grid demand observations partitioned into ${selectedK} clusters`}
         >
+          <defs>
+            <clipPath id={clipId}>
+              <rect x={PAD.left} y={PAD.top} width={PLOT_W} height={PLOT_H} />
+            </clipPath>
+          </defs>
+
           <rect
             x={PAD.left}
             y={PAD.top}
@@ -377,7 +664,7 @@ export default function ClusterScatterPlot({
             strokeWidth="1"
           />
 
-          {targetLayout.xTicks.map((t, idx) => (
+          {xTicks.map((t, idx) => (
             <g key={`xt-${idx}`}>
               <line
                 x1={t.pos}
@@ -395,12 +682,12 @@ export default function ClusterScatterPlot({
                 fontFamily="var(--font-mono)"
                 fontSize="10"
               >
-                {t.val.toFixed(1)}
+                {t.val.toFixed(zoomView.scale > 2.5 ? 2 : 1)}
               </text>
             </g>
           ))}
 
-          {targetLayout.yTicks.map((t, idx) => (
+          {yTicks.map((t, idx) => (
             <g key={`yt-${idx}`}>
               <line
                 x1={PAD.left}
@@ -418,120 +705,145 @@ export default function ClusterScatterPlot({
                 fontFamily="var(--font-mono)"
                 fontSize="10"
               >
-                {t.val.toFixed(1)}
+                {t.val.toFixed(zoomView.scale > 2.5 ? 2 : 1)}
               </text>
             </g>
           ))}
 
-          {targetLayout.zeroX !== null && (
-            <line
-              x1={targetLayout.zeroX}
-              y1={PAD.top}
-              x2={targetLayout.zeroX}
-              y2={PAD.top + PLOT_H}
-              stroke="var(--c-rule-strong)"
-              strokeWidth="0.9"
-            />
-          )}
-          {targetLayout.zeroY !== null && (
-            <line
-              x1={PAD.left}
-              y1={targetLayout.zeroY}
-              x2={PAD.left + PLOT_W}
-              y2={targetLayout.zeroY}
-              stroke="var(--c-rule-strong)"
-              strokeWidth="0.9"
-            />
-          )}
-
-          {/* Batched Cluster Paths with Smooth Opacity Spotlight Transition */}
-          {clusterPaths.map((cp) => {
-            const dimmed = spotlightCluster !== null && spotlightCluster !== cp.cid;
-            const opacityVal = dimmed ? 0.1 : spotlightCluster === cp.cid ? 0.96 : 0.8;
-
-            return (
-              <path
-                key={cp.cid}
-                d={cp.d}
-                fill={cp.isStrokeOnly ? "none" : cp.color}
-                fillOpacity={cp.isStrokeOnly ? undefined : opacityVal}
-                stroke={cp.isStrokeOnly ? cp.color : "none"}
-                strokeOpacity={cp.isStrokeOnly ? opacityVal : undefined}
-                strokeWidth={cp.isStrokeOnly ? 1.45 : 0}
-                style={{ transition: "fill-opacity 200ms ease, stroke-opacity 200ms ease" }}
-              />
-            );
-          })}
-
-          {/* Animated Cluster Centroid Stamps */}
-          {centroids.map((c) => {
-            const dimmed = spotlightCluster !== null && spotlightCluster !== c.cid;
-            return (
-              <g
-                key={`cent-${c.cid}`}
-                transform={`translate(${c.sx.toFixed(1)}, ${c.sy.toFixed(1)})`}
-                style={{
-                  opacity: dimmed ? 0.25 : 1,
-                  transition: "opacity 200ms ease",
-                  cursor: "pointer",
-                }}
-                onClick={() => setPinnedCluster((prev) => (prev === c.cid ? null : c.cid))}
-              >
-                <rect
-                  x="-13"
-                  y="-9"
-                  width="26"
-                  height="18"
-                  fill="var(--c-paper)"
-                  stroke={spotlightCluster === c.cid ? "var(--c-signal)" : "var(--c-ink)"}
-                  strokeWidth="1.4"
-                />
-                <text
-                  x="0"
-                  y="3.5"
-                  textAnchor="middle"
-                  fill={spotlightCluster === c.cid ? "var(--c-signal)" : "var(--c-ink)"}
-                  fontFamily="var(--font-mono)"
-                  fontSize="9.5"
-                  fontWeight="600"
-                >
-                  C{c.cid}
-                </text>
-              </g>
-            );
-          })}
-
-          {/* Active Crosshair Reticle on Hovered Point */}
-          {hoveredPoint && (
-            <g pointerEvents="none">
+          {/* Clipped Interior Plot Plane */}
+          <g clipPath={`url(#${clipId})`}>
+            {zeroX !== null && (
               <line
-                x1={hoveredPoint.sx}
+                x1={zeroX}
                 y1={PAD.top}
-                x2={hoveredPoint.sx}
+                x2={zeroX}
                 y2={PAD.top + PLOT_H}
-                stroke="var(--c-signal)"
-                strokeWidth="0.95"
-                strokeDasharray="3 2"
+                stroke="var(--c-rule-strong)"
+                strokeWidth="0.9"
               />
+            )}
+            {zeroY !== null && (
               <line
                 x1={PAD.left}
-                y1={hoveredPoint.sy}
+                y1={zeroY}
                 x2={PAD.left + PLOT_W}
-                y2={hoveredPoint.sy}
-                stroke="var(--c-signal)"
-                strokeWidth="0.95"
-                strokeDasharray="3 2"
+                y2={zeroY}
+                stroke="var(--c-rule-strong)"
+                strokeWidth="0.9"
               />
-              <circle
-                cx={hoveredPoint.sx}
-                cy={hoveredPoint.sy}
-                r="7.5"
-                fill="none"
+            )}
+
+            {/* Batched Cluster Paths with Smooth Opacity Spotlight Transition */}
+            {clusterPaths.map((cp) => {
+              const dimmed = spotlightCluster !== null && spotlightCluster !== cp.cid;
+              const opacityVal = dimmed ? 0.1 : spotlightCluster === cp.cid ? 0.96 : 0.8;
+
+              return (
+                <path
+                  key={cp.cid}
+                  d={cp.d}
+                  fill={cp.isStrokeOnly ? "none" : cp.color}
+                  fillOpacity={cp.isStrokeOnly ? undefined : opacityVal}
+                  stroke={cp.isStrokeOnly ? cp.color : "none"}
+                  strokeOpacity={cp.isStrokeOnly ? opacityVal : undefined}
+                  strokeWidth={cp.isStrokeOnly ? 1.45 : 0}
+                  style={{ transition: "fill-opacity 200ms ease, stroke-opacity 200ms ease" }}
+                />
+              );
+            })}
+
+            {/* Animated Cluster Centroid Stamps */}
+            {centroids.map((c) => {
+              const dimmed = spotlightCluster !== null && spotlightCluster !== c.cid;
+              const useCssGlide = !reducedMotion && !isMorphing && !isPanning && ! isZoomed;
+              return (
+                <g
+                  key={`cent-${c.cid}`}
+                  style={{
+                    transform: `translate(${c.sx.toFixed(1)}px, ${c.sy.toFixed(1)}px)`,
+                    opacity: dimmed ? 0.25 : 1,
+                    transition: useCssGlide
+                      ? "transform 340ms var(--ease-out-quart), opacity 200ms ease"
+                      : "opacity 200ms ease",
+                    cursor: "pointer",
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPinnedCluster((prev) => (prev === c.cid ? null : c.cid));
+                  }}
+                >
+                  <rect
+                    x="-13"
+                    y="-9"
+                    width="26"
+                    height="18"
+                    fill="var(--c-paper)"
+                    stroke={spotlightCluster === c.cid ? "var(--c-signal)" : "var(--c-ink)"}
+                    strokeWidth="1.4"
+                  />
+                  <text
+                    x="0"
+                    y="3.5"
+                    textAnchor="middle"
+                    fill={spotlightCluster === c.cid ? "var(--c-signal)" : "var(--c-ink)"}
+                    fontFamily="var(--font-mono)"
+                    fontSize="9.5"
+                    fontWeight="600"
+                  >
+                    C{c.cid}
+                  </text>
+                </g>
+              );
+            })}
+
+            {/* Active Crosshair Reticle on Hovered Point */}
+            {hoveredPoint && !dragBox && (
+              <g pointerEvents="none">
+                <line
+                  x1={hoveredPoint.sx}
+                  y1={PAD.top}
+                  x2={hoveredPoint.sx}
+                  y2={PAD.top + PLOT_H}
+                  stroke="var(--c-signal)"
+                  strokeWidth="0.95"
+                  strokeDasharray="3 2"
+                />
+                <line
+                  x1={PAD.left}
+                  y1={hoveredPoint.sy}
+                  x2={PAD.left + PLOT_W}
+                  y2={hoveredPoint.sy}
+                  stroke="var(--c-signal)"
+                  strokeWidth="0.95"
+                  strokeDasharray="3 2"
+                />
+                <circle
+                  cx={hoveredPoint.sx}
+                  cy={hoveredPoint.sy}
+                  r="7.5"
+                  fill="none"
+                  stroke="var(--c-signal)"
+                  strokeWidth="2"
+                />
+              </g>
+            )}
+
+            {/* 2D Rubber-Band Box Zoom Overlay */}
+            {dragBox && (
+              <rect
+                x={Math.min(dragBox.x0, dragBox.x1)}
+                y={Math.min(dragBox.y0, dragBox.y1)}
+                width={Math.abs(dragBox.x1 - dragBox.x0)}
+                height={Math.abs(dragBox.y1 - dragBox.y0)}
+                fill="var(--c-signal)"
+                fillOpacity="0.14"
                 stroke="var(--c-signal)"
-                strokeWidth="2"
+                strokeWidth="1.25"
+                strokeDasharray="4 2"
+                pointerEvents="none"
               />
-            </g>
-          )}
+            )}
+          </g>
 
           <text
             x={PAD.left + PLOT_W / 2}

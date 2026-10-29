@@ -1,5 +1,4 @@
 import React from "react";
-import { API_BASE } from "../services/api";
 import { CLUSTER_GLYPHS } from "../constants/cities";
 
 export function LoadingInstrument({ label = "Acquiring telemetry stream...", height = 280 }) {
@@ -29,7 +28,7 @@ export function LoadingInstrument({ label = "Acquiring telemetry stream...", hei
 export function ErrorState({ error, onRetry, contextLabel = "Telemetry Readout" }) {
   const message =
     error?.message ||
-    `API unreachable at ${API_BASE}. Start the FastAPI server and retry.`;
+    "Telemetry service unreachable. Please ensure the backend server is running and retry.";
 
   return (
     <div className="status-panel is-error" role="alert">
@@ -53,9 +52,6 @@ export function ErrorState({ error, onRetry, contextLabel = "Telemetry Readout" 
         <span className="status-code-tag">FAULT // {contextLabel}</span>
       </div>
       <p style={{ fontSize: "0.95rem", maxInlineSize: "72ch" }}>{message}</p>
-      <p className="font-mono" style={{ fontSize: "0.74rem", color: "var(--c-graphite)" }}>
-        Configured endpoint: <code>{API_BASE}</code>
-      </p>
       {onRetry && (
         <div style={{ marginTop: "0.25rem" }}>
           <button type="button" className="btn-quiet" onClick={onRetry}>

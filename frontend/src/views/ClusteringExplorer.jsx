@@ -16,7 +16,7 @@ export default function ClusteringExplorer({ selectedCity, onSelectCity }) {
   const [scopeMode, setScopeMode] = useState("all");
   const [projection, setProjection] = useState("pca");
   const [kInput, setKInput] = useState(4);
-  const debouncedK = useDebouncedValue(kInput, 220);
+  const debouncedK = useDebouncedValue(kInput, 180);
 
   const [clusterData, setClusterData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -62,6 +62,8 @@ export default function ClusteringExplorer({ selectedCity, onSelectCity }) {
   };
 
   const cityMeta = getCityMeta(selectedCity);
+  const isInitialLoad = loading && !clusterData;
+  const isSyncing = loading && Boolean(clusterData);
 
   return (
     <div className="reveal-frame">
@@ -76,6 +78,13 @@ export default function ClusteringExplorer({ selectedCity, onSelectCity }) {
               Within-city z-scored load, temperature, humidity, wind, and cyclical hour vectors
               partitioned via K-Means (k = 2..8). Optimal k = 4 reaches 0.990 bootstrap ARI.
             </p>
+            {isSyncing && (
+              <div style={{ marginBlockStart: "0.75rem" }}>
+                <span className="sync-badge" aria-live="polite">
+                  Re-partitioning manifold...
+                </span>
+              </div>
+            )}
           </div>
 
           <div>
@@ -150,7 +159,7 @@ export default function ClusteringExplorer({ selectedCity, onSelectCity }) {
               )}
             </div>
 
-            {loading ? (
+            {isInitialLoad ? (
               <div className="split-8-4">
                 <LoadingInstrument
                   label={`Projecting ${
@@ -165,7 +174,7 @@ export default function ClusteringExplorer({ selectedCity, onSelectCity }) {
             ) : !clusterData?.points?.length ? (
               <EmptyState
                 title="No clustered vectors returned"
-                description="GET /api/clusters returned zero sample points for the selected parameters."
+                description="The server returned zero sample points for the selected parameters."
                 actionLabel="Reset Scope to All Cities"
                 onAction={() => {
                   setScopeMode("all");
@@ -173,7 +182,7 @@ export default function ClusteringExplorer({ selectedCity, onSelectCity }) {
                 }}
               />
             ) : (
-              <div className="split-8-4">
+              <div className={`split-8-4 sync-surface ${isSyncing ? "is-syncing" : ""}`}>
                 <ClusterScatterPlot
                   points={clusterData.points}
                   projection={projection}
@@ -189,7 +198,7 @@ export default function ClusteringExplorer({ selectedCity, onSelectCity }) {
           </div>
 
           {/* Deliberate Grid Break: 4 Operational Regime Ledger Cards derived from `profiles` */}
-          {!loading && !error && clusterData?.profiles?.length > 0 && (
+          {!isInitialLoad && !error && clusterData?.profiles?.length > 0 && (
             <div className="grid-break-bleed" style={{ backgroundColor: "var(--c-paper)" }}>
               <span className="grid-break-stamp">
                 CANONICAL k = 4 OPERATIONAL REGIMES // FULL 163,993-HOUR CORPUS
@@ -205,7 +214,10 @@ export default function ClusteringExplorer({ selectedCity, onSelectCity }) {
                 }}
               >
                 <div>
-                  <h2 className="section-heading" style={{ fontSize: "var(--text-h2)", marginBlockEnd: "0.2rem" }}>
+                  <h2
+                    className="section-heading"
+                    style={{ fontSize: "var(--text-h2)", marginBlockEnd: "0.2rem" }}
+                  >
                     Physical Interpretation of Discovered Regimes
                   </h2>
                   <p className="section-lede">
@@ -268,7 +280,10 @@ export default function ClusteringExplorer({ selectedCity, onSelectCity }) {
                           color: prof.demand_z_mean > 0.5 ? "var(--c-signal)" : "var(--c-ink)",
                         }}
                       >
-                        {prof.demand_z_mean > 0 ? `+${prof.demand_z_mean.toFixed(2)}` : prof.demand_z_mean.toFixed(2)} σ
+                        {prof.demand_z_mean > 0
+                          ? `+${prof.demand_z_mean.toFixed(2)}`
+                          : prof.demand_z_mean.toFixed(2)}{" "}
+                        σ
                       </span>
 
                       <span style={{ color: "var(--c-graphite)" }}>Mean Temp</span>

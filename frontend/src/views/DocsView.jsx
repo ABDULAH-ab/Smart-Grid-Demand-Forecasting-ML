@@ -100,14 +100,16 @@ export default function DocsView() {
                   </p>
                 </div>
                 <div>
-                  <h3 className="font-mono" style={{ fontSize: "0.78rem", marginBlockEnd: "0.35rem" }}>
-                    MULTI-PEN TRACE SPOTLIGHT &amp; ACCESSIBILITY
-                  </h3>
-                  <p style={{ color: "var(--c-graphite)" }}>
-                    Each forecasting model has a distinct colorblind-tested pen ink and dash
-                    signature. Hover or click any pen pill to spotlight a single trace, toggle the
-                    time-window zoom scrubber, or expand collapsible keyboard-scrollable tables.
-                  </p>
+                    <h3 className="font-mono" style={{ fontSize: "0.78rem", marginBlockEnd: "0.35rem" }}>
+                      ZOOM, PAN &amp; TRACE SPOTLIGHTING
+                    </h3>
+                    <p style={{ color: "var(--c-graphite)" }}>
+                      Click and drag across any strip-chart (or drag a 2D box on the cluster plane) to
+                      zoom into a slice, use <code>+ / - / &lt; / &gt;</code> or{" "}
+                      <code>Wheel</code> (<code>Ctrl+Scroll</code> anytime), and double-click or press{" "}
+                      <code>Reset</code> to restore 1.0x. Hover or click any pen pill to spotlight a
+                      single model trace.
+                    </p>
                 </div>
                 <div>
                   <h3 className="font-mono" style={{ fontSize: "0.78rem", marginBlockEnd: "0.35rem" }}>

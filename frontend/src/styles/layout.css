@@ -109,6 +109,7 @@ summary,
     opacity: 0;
     transform: translateY(8px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -116,11 +117,13 @@ summary,
 }
 
 @keyframes reticlePulse {
+
   0%,
   100% {
     transform: scale(1);
     opacity: 0.9;
   }
+
   50% {
     transform: scale(1.22);
     opacity: 0.45;
@@ -455,7 +458,7 @@ summary,
   align-items: start;
 }
 
-.asymmetric-grid > * {
+.asymmetric-grid>* {
   min-inline-size: 0;
 }
 
@@ -539,9 +542,9 @@ summary,
   align-items: start;
 }
 
-.split-7-5 > *,
-.split-8-4 > *,
-.split-6-6 > * {
+.split-7-5>*,
+.split-8-4>*,
+.split-6-6>* {
   min-inline-size: 0;
 }
 
@@ -912,6 +915,127 @@ summary,
   min-inline-size: 0;
   overflow: clip;
   position: relative;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Mechanical Instrument Zoom & Pan Toolbar */
+.instrument-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem 0.65rem;
+}
+
+.zoom-toolbar {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--c-ink);
+  background-color: var(--c-paper);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+
+.zoom-btn {
+  appearance: none;
+  background: var(--c-paper);
+  border: none;
+  border-inline-end: 1px solid var(--c-rule-strong);
+  color: var(--c-ink);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  font-weight: 500;
+  min-inline-size: 27px;
+  min-block-size: 26px;
+  padding: 0 0.42rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) ease, color var(--dur-fast) ease;
+}
+
+.zoom-btn:last-child {
+  border-inline-end: none;
+}
+
+.zoom-btn.is-text {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding-inline: 0.48rem;
+}
+
+.zoom-btn:hover:not(:disabled) {
+  background-color: var(--c-vellum);
+}
+
+.zoom-btn:disabled {
+  color: var(--c-rule-strong);
+  cursor: not-allowed;
+}
+
+.zoom-btn[aria-pressed="true"] {
+  background-color: var(--c-ink);
+  color: var(--c-paper);
+}
+
+.zoom-btn.is-reset {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--c-signal);
+  font-weight: 600;
+  padding-inline: 0.5rem;
+}
+
+.zoom-btn.is-reset:hover {
+  background-color: var(--c-signal);
+  color: var(--c-paper);
+}
+
+.zoom-readout {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: 42px;
+  padding: 0 0.42rem;
+  border-inline-end: 1px solid var(--c-rule-strong);
+  background-color: var(--c-vellum);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.68rem;
+  color: var(--c-graphite);
+}
+
+.zoom-readout.is-zoomed {
+  color: var(--c-signal);
+  font-weight: 600;
+}
+
+/* Non-layout-shifting Inline Parameter Sync Stamp */
+.sync-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.16rem 0.48rem;
+  border: 1px solid var(--c-signal);
+  background-color: var(--c-signal-tint);
+  color: var(--c-signal);
+  animation: paperPulse 1s ease-in-out infinite;
+}
+
+.sync-surface {
+  transition: opacity 180ms ease;
+}
+
+.sync-surface.is-syncing {
+  opacity: 0.88;
 }
 
 /* Custom Instrument Tooltip */
@@ -985,6 +1109,10 @@ summary,
 }
 
 .gp-table caption {
+  display: table-caption;
+  caption-side: top;
+  inline-size: 100%;
+  box-sizing: border-box;
   text-align: left;
   padding: 0.55rem 0.85rem;
   font-family: var(--font-mono);
@@ -1063,68 +1191,44 @@ summary,
   border-inline-start: 3px solid var(--c-signal);
 }
 
-@container (inline-size < 600px) {
-  .gp-table,
-  .gp-table thead,
-  .gp-table tbody,
-  .gp-table tr,
-  .gp-table th,
-  .gp-table td {
-    display: block;
-  }
+@container (inline-size < 380px) {
 
-  .gp-table thead {
-    display: none;
-  }
-
-  .gp-table tbody tr {
-    margin-block-end: var(--space-3);
-    border-block-end: 2px solid var(--c-ink);
-  }
-
-  .gp-table tbody th {
-    position: sticky;
-    inset-block-start: 0;
-    z-index: 2;
-    background: var(--c-vellum);
-    border-block-end: 1px solid var(--c-rule-strong);
-    white-space: normal;
-  }
-
+  .gp-table thead th,
   .gp-table tbody td,
-  .gp-table tbody td.align-right {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    text-align: right;
-    gap: var(--space-3);
+  .gp-table tbody th {
+    padding: 0.45rem 0.5rem;
+    font-size: 0.72rem;
   }
+}
 
-  .gp-table td:nth-child(2)::before {
-    content: var(--label-2, "") ": ";
-    color: var(--c-graphite);
-    text-align: left;
-  }
-  .gp-table td:nth-child(3)::before {
-    content: var(--label-3, "") ": ";
-    color: var(--c-graphite);
-    text-align: left;
-  }
-  .gp-table td:nth-child(4)::before {
-    content: var(--label-4, "") ": ";
-    color: var(--c-graphite);
-    text-align: left;
-  }
-  .gp-table td:nth-child(5)::before {
-    content: var(--label-5, "") ": ";
-    color: var(--c-graphite);
-    text-align: left;
-  }
-  .gp-table td:nth-child(6)::before {
-    content: var(--label-6, "") ": ";
-    color: var(--c-graphite);
-    text-align: left;
-  }
+/* Compact Leaderboard Instrument Styles */
+.gp-table-compact {
+  inline-size: 100%;
+  table-layout: fixed;
+  box-sizing: border-box;
+}
+
+.gp-table-compact thead th {
+  padding: 0.42rem 0.45rem;
+  font-size: 0.68rem;
+  background: var(--c-vellum);
+  box-sizing: border-box;
+}
+
+.gp-table-compact tbody th,
+.gp-table-compact tbody td {
+  padding: 0.48rem 0.45rem;
+  font-size: 0.76rem;
+  box-sizing: border-box;
+}
+
+.leaderboard-frame {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 /* ==========================================================================
@@ -1260,10 +1364,12 @@ summary,
    ========================================================================== */
 
 @keyframes paperPulse {
+
   0%,
   100% {
     opacity: 0.45;
   }
+
   50% {
     opacity: 0.85;
   }
@@ -1331,6 +1437,7 @@ summary,
 }
 
 @media (max-width: 980px) {
+
   .hero-ledger,
   .split-7-5 {
     grid-template-columns: 1fr;

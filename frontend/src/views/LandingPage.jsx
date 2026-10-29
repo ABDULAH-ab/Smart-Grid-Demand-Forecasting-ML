@@ -46,6 +46,8 @@ export default function LandingPage({ onEnterApp }) {
     setReloadToken((n) => n + 1);
   }, []);
 
+  const isInitialLoad = loading && !previewSeries.length && !leaderboard.length;
+
   return (
     <div className="reveal-frame">
       {/* 1. Hero Ledger */}
@@ -144,33 +146,24 @@ export default function LandingPage({ onEnterApp }) {
       <section className="editorial-section" style={{ borderBlockEnd: "none" }} aria-labelledby="live-preview-heading">
         <div className="asymmetric-grid">
           <div className="grid-break-bleed">
-            <span className="grid-break-stamp">LIVE TELEMETRY STREAM // API DIRECT</span>
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                justifyContent: "space-between",
-                alignItems: "flex-end",
-                gap: "1rem",
-                marginBlockEnd: "1.25rem",
-              }}
-            >
+            <span className="grid-break-stamp">LIVE TELEMETRY STREAM // VERIFIED READOUT</span>
+            <div className="split-7-5" style={{ alignItems: "end", marginBlockEnd: "1.25rem" }}>
               <div>
                 <h2 id="live-preview-heading" className="section-heading" style={{ marginBlockEnd: "0.35rem" }}>
                   Holdout Verification Readout
                 </h2>
-                <p className="section-lede">
-                  Pulled live from <code>GET /api/forecasts</code> (Dallas ERCOT, Apr 1–7 2020) and{" "}
-                  <code>GET /api/leaderboard</code>. Open the workbench to switch cities, inspect
-                  residuals, or re-cluster.
+                <p className="section-lede" style={{ maxInlineSize: "100%", lineHeight: 1.55 }}>
+                  Live holdout telemetry (Dallas ERCOT, Apr 1–7, 2020) and 10-city model leaderboard. Open the workbench to switch cities, inspect residuals, or re-cluster.
                 </p>
               </div>
-              <button type="button" className="btn-quiet" onClick={onEnterApp}>
-                Open Full Dispatch Console -&gt;
-              </button>
+              <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "flex-end" }}>
+                <button type="button" className="btn-quiet" onClick={onEnterApp}>
+                  Open Full Dispatch Console -&gt;
+                </button>
+              </div>
             </div>
 
-            {loading ? (
+            {isInitialLoad ? (
               <div className="split-7-5">
                 <LoadingInstrument label="Streaming Dallas ERCOT April 2020 trace..." height={270} />
                 <LoadingInstrument label="Loading 7-model holdout leaderboard..." height={270} />

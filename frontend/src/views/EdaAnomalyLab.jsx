@@ -55,6 +55,8 @@ export default function EdaAnomalyLab({ selectedCity, onSelectCity }) {
   }, [eda, selectedCity]);
 
   const cityMeta = getCityMeta(selectedCity);
+  const isInitialLoad = loading && !eda;
+  const isSyncing = loading && Boolean(eda);
 
   return (
     <div className="reveal-frame">
@@ -71,9 +73,16 @@ export default function EdaAnomalyLab({ selectedCity, onSelectCity }) {
             </p>
 
             <div className="control-field" style={{ marginBlockStart: "1.25rem" }}>
-              <label htmlFor="eda-city-select" className="control-label">
-                Inspect Metered Zone
-              </label>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" }}>
+                <label htmlFor="eda-city-select" className="control-label">
+                  Inspect Metered Zone
+                </label>
+                {isSyncing && (
+                  <span className="sync-badge" aria-live="polite">
+                    Syncing...
+                  </span>
+                )}
+              </div>
               <select
                 id="eda-city-select"
                 className="gp-select"
@@ -90,19 +99,19 @@ export default function EdaAnomalyLab({ selectedCity, onSelectCity }) {
           </div>
 
           <div>
-            {loading ? (
+            {isInitialLoad ? (
               <LoadingInstrument label={`Auditing ${cityMeta.name} sensor ledger...`} height={310} />
             ) : error ? (
               <ErrorState error={error} onRetry={handleRetry} contextLabel="EDA & ANOMALY LAB" />
             ) : !eda ? (
               <EmptyState
                 title="No EDA payload available"
-                description="GET /api/eda returned an empty record set."
+                description="The server returned an empty record set for this city."
                 actionLabel="Retry Audit"
                 onAction={handleRetry}
               />
             ) : (
-              <>
+              <div className={`sync-surface ${isSyncing ? "is-syncing" : ""}`}>
                 <div className="metric-strip" style={{ marginBlockEnd: "1.25rem" }}>
                   <div className="metric-cell">
                     <div className="metric-cell-label">Severe Spikes Fixed (10 Cities)</div>
@@ -148,12 +157,12 @@ export default function EdaAnomalyLab({ selectedCity, onSelectCity }) {
                   diurnalProfile={eda.diurnal_profile || []}
                   cityLabel={`${cityMeta.name} (${cityMeta.iso})`}
                 />
-              </>
+              </div>
             )}
           </div>
 
           {/* Deliberate Grid Break: Full-width Before-vs-After Telemetry Fault Caliper */}
-          {!loading && !error && eda && (
+          {!isInitialLoad && !error && eda && (
             <div className="grid-break-bleed" style={{ backgroundColor: "var(--c-paper)" }}>
               <span className="grid-break-stamp">BEFORE VS. AFTER // SENSOR REPAIR AUDIT</span>
               <BeforeAfterFaultCaliper
@@ -163,7 +172,9 @@ export default function EdaAnomalyLab({ selectedCity, onSelectCity }) {
               />
 
               <details className="chart-table-disclosure">
-                <summary>Open Full 10-City Anomaly Rule Ledger (Physical, Z-Score, IQR, Ramp, IsoForest)</summary>
+                <summary>
+                  Open Full 10-City Anomaly Rule Ledger (Physical, Z-Score, IQR, Ramp, IsoForest)
+                </summary>
                 <div
                   tabIndex={0}
                   role="region"
@@ -237,8 +248,11 @@ export default function EdaAnomalyLab({ selectedCity, onSelectCity }) {
           )}
 
           {/* Full 2018-2020 Daily Trend Recorder */}
-          {!loading && !error && eda && (
-            <div style={{ gridColumn: "1 / -1" }}>
+          {!isInitialLoad && !error && eda && (
+            <div
+              style={{ gridColumn: "1 / -1" }}
+              className={`sync-surface ${isSyncing ? "is-syncing" : ""}`}
+            >
               <DailyTrendRecorder
                 dailySeries={eda.daily_series || []}
                 cityLabel={`${cityMeta.name} (${cityMeta.iso})`}

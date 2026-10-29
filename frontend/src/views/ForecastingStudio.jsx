@@ -50,9 +50,10 @@ export default function ForecastingStudio({ selectedCity, onSelectCity }) {
   const [activeModels, setActiveModels] = useState(() =>
     FORECAST_MODELS.filter((m) => m.defaultOn).map((m) => m.key)
   );
+  const [studioZoomRange, setStudioZoomRange] = useState(null);
 
-  const debouncedStart = useDebouncedValue(startDate, 260);
-  const debouncedEnd = useDebouncedValue(endDate, 260);
+  const debouncedStart = useDebouncedValue(startDate, 240);
+  const debouncedEnd = useDebouncedValue(endDate, 240);
 
   const [forecastPayload, setForecastPayload] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -116,20 +117,31 @@ export default function ForecastingStudio({ selectedCity, onSelectCity }) {
   };
 
   const applyPreset = (start, end) => {
+    setStudioZoomRange(null);
     setStartDate(start);
     setEndDate(end);
   };
+
+  const isInitialLoad = loading && !forecastPayload;
+  const isSyncing = loading && Boolean(forecastPayload);
 
   const primaryFocusModel = activeModels.includes("Stacking_Ensemble")
     ? "Stacking_Ensemble"
     : activeModels[0] || "Stacking_Ensemble";
 
+  const activeEvalSeries = useMemo(() => {
+    const full = forecastPayload?.series || [];
+    if (!full.length || !studioZoomRange) return full;
+    const s = Math.max(0, Math.min(full.length - 1, studioZoomRange[0]));
+    const e = Math.max(s, Math.min(full.length - 1, studioZoomRange[1]));
+    return full.slice(s, e + 1);
+  }, [forecastPayload, studioZoomRange]);
+
   const { focusMetrics, naiveMetrics, allWindowMetrics, maxImportance } = useMemo(() => {
-    const series = forecastPayload?.series || [];
     const fi = forecastPayload?.feature_importance || [];
     const maxImp = Math.max(...fi.map((f) => Number(f.importance) || 0), 0.01);
 
-    if (!series.length) {
+    if (!activeEvalSeries.length) {
       return {
         focusMetrics: null,
         naiveMetrics: null,
@@ -141,13 +153,13 @@ export default function ForecastingStudio({ selectedCity, onSelectCity }) {
     const computedAll = FORECAST_MODELS.map((m) => ({
       key: m.key,
       label: m.label,
-      stats: computeWindowMetrics(series, m.key),
+      stats: computeWindowMetrics(activeEvalSeries, m.key),
     }))
       .filter((r) => r.stats !== null)
       .sort((a, b) => a.stats.rmse - b.stats.rmse);
 
-    const focus = computeWindowMetrics(series, primaryFocusModel);
-    const naive = computeWindowMetrics(series, "Naive_Baseline");
+    const focus = computeWindowMetrics(activeEvalSeries, primaryFocusModel);
+    const naive = computeWindowMetrics(activeEvalSeries, "Naive_Baseline");
 
     return {
       focusMetrics: focus,
@@ -155,12 +167,15 @@ export default function ForecastingStudio({ selectedCity, onSelectCity }) {
       allWindowMetrics: computedAll,
       maxImportance: maxImp,
     };
-  }, [forecastPayload, primaryFocusModel]);
+  }, [activeEvalSeries, forecastPayload, primaryFocusModel]);
 
   const windowSkillPct =
     focusMetrics && naiveMetrics && naiveMetrics.rmse > 0
-      ? ((1 - focusMetrics.rmse / naiveMetrics.rmse) * 100)
+      ? (1 - focusMetrics.rmse / naiveMetrics.rmse) * 100
       : null;
+
+  const fullCount = forecastPayload?.series?.length || 0;
+  const isZoomedSlice = Boolean(studioZoomRange) && activeEvalSeries.length < fullCount;
 
   return (
     <div className="reveal-frame">
@@ -176,8 +191,22 @@ export default function ForecastingStudio({ selectedCity, onSelectCity }) {
               2020 holdout archive ({HOLDOUT_MIN_DATE} to {cityMeta.holdoutEnd}).
             </p>
 
-            <div style={{ marginBlockStart: "1.2rem", display: "flex", flexDirection: "column", gap: "0.4rem" }}>
-              <span className="control-label">Holdout Window Presets</span>
+            <div
+              style={{
+                marginBlockStart: "1.2rem",
+                display: "flex",
+                flexDirection: "column",
+                gap: "0.4rem",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" }}>
+                <span className="control-label">Holdout Window Presets</span>
+                {isSyncing && (
+                  <span className="sync-badge" aria-live="polite">
+                    Syncing...
+                  </span>
+                )}
+              </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
                 <button
                   type="button"
@@ -211,9 +240,9 @@ export default function ForecastingStudio({ selectedCity, onSelectCity }) {
 
           <div>
             {/* Studio Console: City + Start/End Dates + 7 Model Checkboxes */}
-            <form
+            <div
+              role="region"
               className="control-console"
-              onSubmit={(e) => e.preventDefault()}
               aria-label="Forecast studio controls"
             >
               <div className="control-field">
@@ -311,9 +340,9 @@ export default function ForecastingStudio({ selectedCity, onSelectCity }) {
                   );
                 })}
               </div>
-            </form>
+            </div>
 
-            {/* Date Validation & Data States */}
+            {/* Date Validation & Data States (Charts stay mounted during parameter updates) */}
             {dateRangeInvalid ? (
               <EmptyState
                 title="Invalid date window: Start Date must precede or equal End Date"
@@ -332,7 +361,7 @@ export default function ForecastingStudio({ selectedCity, onSelectCity }) {
                 actionLabel="Snap to Valid Holdout Window"
                 onAction={() => applyPreset("2020-04-01", "2020-04-10")}
               />
-            ) : loading ? (
+            ) : isInitialLoad ? (
               <LoadingInstrument
                 label={`Fetching ${cityMeta.name} hourly traces (${debouncedStart}..${debouncedEnd})...`}
                 height={340}
@@ -348,21 +377,26 @@ export default function ForecastingStudio({ selectedCity, onSelectCity }) {
               />
             ) : (
               /* Live Window MAE / RMSE / MAPE Readout Strip */
-              <div className="metric-strip">
+              <div className={`metric-strip sync-surface ${isSyncing ? "is-syncing" : ""}`}>
                 <div className="metric-cell">
                   <div className="metric-cell-label">
-                    Window RMSE ({formatModelName(primaryFocusModel)})
+                    {isZoomedSlice ? "Zoomed RMSE" : "Window RMSE"} (
+                    {formatModelName(primaryFocusModel)})
                   </div>
                   <div className="metric-cell-value" style={{ color: "var(--c-signal)" }}>
                     {focusMetrics ? `${focusMetrics.rmse.toFixed(1)} MWh` : "--"}
                   </div>
                   <div className="metric-cell-sub">
-                    {focusMetrics?.n ?? 0} hourly intervals evaluated
+                    {isZoomedSlice
+                      ? `${focusMetrics?.n ?? 0} of ${fullCount} zoomed hrs`
+                      : `${focusMetrics?.n ?? 0} hourly intervals evaluated`}
                   </div>
                 </div>
 
                 <div className="metric-cell">
-                  <div className="metric-cell-label">Window MAE</div>
+                  <div className="metric-cell-label">
+                    {isZoomedSlice ? "Zoomed MAE" : "Window MAE"}
+                  </div>
                   <div className="metric-cell-value">
                     {focusMetrics ? `${focusMetrics.mae.toFixed(1)} MWh` : "--"}
                   </div>
@@ -370,7 +404,9 @@ export default function ForecastingStudio({ selectedCity, onSelectCity }) {
                 </div>
 
                 <div className="metric-cell">
-                  <div className="metric-cell-label">Window MAPE</div>
+                  <div className="metric-cell-label">
+                    {isZoomedSlice ? "Zoomed MAPE" : "Window MAPE"}
+                  </div>
                   <div className="metric-cell-value">
                     {focusMetrics ? `${focusMetrics.mape.toFixed(2)}%` : "--"}
                   </div>
@@ -378,7 +414,7 @@ export default function ForecastingStudio({ selectedCity, onSelectCity }) {
                 </div>
 
                 <div className="metric-cell">
-                  <div className="metric-cell-label">Window Skill vs. Naive</div>
+                  <div className="metric-cell-label">Skill vs. Naive</div>
                   <div className="metric-cell-value">
                     {windowSkillPct !== null
                       ? `${windowSkillPct >= 0 ? "+" : ""}${windowSkillPct.toFixed(1)}%`
@@ -392,28 +428,43 @@ export default function ForecastingStudio({ selectedCity, onSelectCity }) {
             )}
           </div>
 
-          {/* Deliberate Grid Break: Full-width Primary Forecast Readout Chart */}
+          {/* Deliberate Grid Break: Full-width Primary Forecast Readout Chart (Never unmounted during parameter sync) */}
           {!dateRangeInvalid &&
             !outsideHoldoutEnvelope &&
-            !loading &&
+            !isInitialLoad &&
             !error &&
             forecastPayload?.series?.length > 0 && (
               <>
-                <div className="grid-break-bleed" style={{ backgroundColor: "var(--c-paper)" }}>
-                  <span className="grid-break-stamp">
-                    PRIMARY INSTRUMENT // {cityMeta.name.toUpperCase()} ({cityMeta.iso})
-                  </span>
+                <div
+                  className={`grid-break-bleed sync-surface ${isSyncing ? "is-syncing" : ""}`}
+                  style={{ backgroundColor: "var(--c-paper)" }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      alignItems: "center",
+                      gap: "0.6rem",
+                      marginBlockEnd: "var(--space-3)",
+                    }}
+                  >
+                    <span className="grid-break-stamp" style={{ marginBlockEnd: 0 }}>
+                      PRIMARY INSTRUMENT // {cityMeta.name.toUpperCase()} ({cityMeta.iso})
+                    </span>
+                    {isSyncing && <span className="sync-badge">Updating traces...</span>}
+                  </div>
+
                   <ForecastReadoutChart
                     series={forecastPayload.series}
                     activeModels={activeModels}
                     cityLabel={`${cityMeta.name} (${cityMeta.iso})`}
                     height={365}
-                    syncId="studioSync"
+                    onZoomRangeChange={setStudioZoomRange}
                   />
 
                   <details className="chart-table-disclosure">
                     <summary>
-                      Compare Live Window Metrics Across All 7 Models ({forecastPayload.row_count} hrs)
+                      Compare Live Window Metrics Across All 7 Models ({activeEvalSeries.length} hrs)
                     </summary>
                     <div
                       tabIndex={0}
@@ -463,7 +514,10 @@ export default function ForecastingStudio({ selectedCity, onSelectCity }) {
                 </div>
 
                 {/* Lower Asymmetric Split: Residual+Temp Recorder (7fr) + Feature Importances (5fr) */}
-                <div style={{ gridColumn: "1 / -1" }} className="split-7-5">
+                <div
+                  style={{ gridColumn: "1 / -1" }}
+                  className={`split-7-5 sync-surface ${isSyncing ? "is-syncing" : ""}`}
+                >
                   <ResidualTempChart
                     series={forecastPayload.series}
                     primaryModel={primaryFocusModel}
